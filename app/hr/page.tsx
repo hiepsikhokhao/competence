@@ -7,6 +7,7 @@ import CycleTab from '@/components/hr/CycleTab'
 import UsersTab from '@/components/hr/UsersTab'
 import SkillsTab from '@/components/hr/SkillsTab'
 import ExportTab from '@/components/hr/ExportTab'
+import type { FunctionType } from '@/lib/types'
 
 export const metadata = { title: 'HR Admin — Competency Tool' }
 
@@ -21,7 +22,7 @@ const TABS = [
 export default async function HrPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>
+  searchParams: Promise<{ tab?: string; fn?: string }>
 }) {
   const supabase = await createServerSupabaseClient()
 
@@ -36,23 +37,24 @@ export default async function HrPage({
 
   if (profile?.role !== 'hr') redirect('/login')
 
-  const params = await searchParams
-  const tab    = params.tab ?? 'dashboard'
+  const params  = await searchParams
+  const tab     = params.tab ?? 'dashboard'
+  const drillFn = (params.fn ?? null) as FunctionType | null
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-[#F4F6FB]">
       <div className="mx-auto max-w-6xl px-4 py-8">
 
         {/* Header */}
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">HR Admin</h1>
-            <p className="mt-1 text-sm text-gray-500">{profile.name}</p>
+            <h1 className="text-2xl font-bold text-[#003087]">HR Admin</h1>
+            <p className="mt-1 text-sm text-[#6B7280]">{profile.name}</p>
           </div>
           <form action={logout}>
             <button
               type="submit"
-              className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
             >
               Sign out
             </button>
@@ -61,7 +63,7 @@ export default async function HrPage({
 
         <TabBar tabs={TABS} currentTab={tab} />
 
-        {tab === 'dashboard' && <DashboardTab />}
+        {tab === 'dashboard' && <DashboardTab drillFn={drillFn} />}
         {tab === 'cycle'     && <CycleTab />}
         {tab === 'users'     && <UsersTab />}
         {tab === 'skills'    && <SkillsTab />}

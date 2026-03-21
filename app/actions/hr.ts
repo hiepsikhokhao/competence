@@ -71,6 +71,24 @@ export async function closeCycle(
   } catch (e) { return { error: (e as Error).message } }
 }
 
+// ── Users ─────────────────────────────────────────────────────────────────────
+
+export async function updateUserManager(
+  userId: string,
+  managerId: string | null,
+): Promise<{ error?: string }> {
+  try {
+    const supabase = await requireHr()
+    const { error } = await supabase
+      .from('users')
+      .update({ manager_id: managerId })
+      .eq('id', userId)
+    if (error) return { error: error.message }
+    revalidatePath('/hr')
+    return {}
+  } catch (e) { return { error: (e as Error).message } }
+}
+
 // ── Users / CSV import ────────────────────────────────────────────────────────
 
 export type CsvUserRow = {
@@ -89,8 +107,8 @@ export type ImportResult = {
   errors:  string[]
 }
 
-const VALID_ROLES:    UserRole[]    = ['employee', 'manager', 'hr']
-const VALID_FUNCS:   FunctionType[] = ['UA', 'MKT', 'LiveOps']
+const VALID_ROLES:  UserRole[]    = ['employee', 'manager', 'hr']
+const VALID_FUNCS: FunctionType[] = ['UA', 'MKT', 'LiveOps']
 
 export async function importUsers(
   rows: CsvUserRow[],
@@ -117,10 +135,10 @@ export async function importUsers(
     }
 
     const patch: Record<string, unknown> = {}
-    if (row.name?.trim())                                    patch.name      = row.name.trim()
-    if (row.dept?.trim())                                    patch.dept      = row.dept.trim()
-    if (row.job_level?.trim())                               patch.job_level = row.job_level.trim()
-    if (row.role     && VALID_ROLES.includes(row.role as UserRole))       patch.role     = row.role
+    if (row.name?.trim())                                      patch.name      = row.name.trim()
+    if (row.dept?.trim())                                      patch.dept      = row.dept.trim()
+    if (row.job_level?.trim())                                 patch.job_level = row.job_level.trim()
+    if (row.role     && VALID_ROLES.includes(row.role as UserRole))         patch.role     = row.role
     if (row.function && VALID_FUNCS.includes(row.function as FunctionType)) patch.function = row.function
 
     if (row.manager_email?.trim()) {
@@ -161,7 +179,7 @@ export async function createSkill(input: {
 }
 
 export async function updateSkill(
-  id:   string,
+  id:    string,
   patch: { name: string; definition: string | null },
 ): Promise<{ error?: string }> {
   try {

@@ -91,7 +91,7 @@ export default async function ManagerPage({
     if (employeeFunction) {
       const { data: skillsData } = await supabase
         .from('skills')
-        .select('id, name')
+        .select('id, name, definition')
         .eq('function', employeeFunction)
         .order('name')
 
@@ -100,7 +100,7 @@ export default async function ManagerPage({
       if (skills.length > 0) {
         const skillIds = skills.map((s) => s.id)
 
-        const [scoresResult, standardsResult] = await Promise.all([
+        const [scoresResult, standardsResult, levelsResult] = await Promise.all([
           supabase
             .from('assessment_scores')
             .select('skill_id, self_score, manager_score')
@@ -112,6 +112,11 @@ export default async function ManagerPage({
                 .in('skill_id', skillIds)
                 .eq('job_level', member.job_level)
             : Promise.resolve({ data: [] as { skill_id: string; required_level: number }[] | null }),
+          supabase
+            .from('skill_levels')
+            .select('skill_id, level, label, description')
+            .in('skill_id', skillIds)
+            .order('level'),
         ])
 
         const scoresMap    = Object.fromEntries((scoresResult.data ?? []).map((s) => [s.skill_id, s]))
@@ -119,9 +124,18 @@ export default async function ManagerPage({
           (standardsResult.data ?? []).map((s) => [s.skill_id, s.required_level as ProficiencyLevel])
         )
 
+        // Build skill_levels map: skillId → sorted level rows
+        const levelsMap: Record<string, { level: number; label: string | null; description: string | null }[]> = {}
+        for (const l of levelsResult.data ?? []) {
+          levelsMap[l.skill_id] ??= []
+          levelsMap[l.skill_id].push(l)
+        }
+
         reviewRows = skills.map((s) => ({
           skill_id:       s.id,
           skill_name:     s.name,
+          definition:     s.definition,
+          levels:         levelsMap[s.id] ?? [],
           self_score:     (scoresMap[s.id]?.self_score    ?? null) as ProficiencyLevel | null,
           manager_score:  (scoresMap[s.id]?.manager_score ?? null) as ProficiencyLevel | null,
           required_level: standardsMap[s.id] ?? null,
@@ -162,14 +176,14 @@ export default async function ManagerPage({
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-[#F4F6FB]">
       <div className="mx-auto max-w-4xl px-4 py-8">
 
         {/* Page header */}
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Manager Dashboard</h1>
-            <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
+            <h1 className="text-2xl font-bold text-[#003087]">Manager Dashboard</h1>
+            <div className="mt-1 flex items-center gap-2 text-sm text-[#6B7280]">
               <span>{profile.name}</span>
               {userFunction && (
                 <>
@@ -183,7 +197,7 @@ export default async function ManagerPage({
           <form action={logout}>
             <button
               type="submit"
-              className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
             >
               Sign out
             </button>

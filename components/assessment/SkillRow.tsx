@@ -38,19 +38,19 @@ export default function SkillRow({
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {([1, 2, 3, 4] as const).map((lvl) => {
-          const levelData = levels.find((l) => l.level === lvl)
-          const label = levelData?.label ?? PROFICIENCY_LABELS[lvl]
+          const levelData   = levels.find((l) => l.level === lvl)
+          const label       = levelData?.label ?? PROFICIENCY_LABELS[lvl]
           const description = levelData?.description ?? null
-          const checked = currentScore === lvl
+          const checked     = currentScore === lvl
 
           return (
             <label
               key={lvl}
               className={[
                 'flex cursor-pointer flex-col gap-1 rounded-lg border-2 p-3 transition-colors',
-                disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-indigo-50',
+                disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-blue-50',
                 checked
-                  ? 'border-indigo-500 bg-indigo-50'
+                  ? 'border-[#0057D9] bg-blue-50'
                   : 'border-gray-200',
               ].join(' ')}
             >
@@ -63,7 +63,7 @@ export default function SkillRow({
                 onChange={() => onChange(skillId, lvl)}
                 className="sr-only"
               />
-              <span className="text-xs font-bold text-indigo-700">{lvl}</span>
+              <span className="text-xs font-bold text-[#0057D9]">{lvl}</span>
               <span className="text-xs font-medium text-gray-800 leading-tight">
                 {label}
               </span>

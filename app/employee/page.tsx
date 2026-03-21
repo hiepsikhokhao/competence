@@ -24,14 +24,14 @@ export default async function EmployeePage() {
   const userJobLevel = profile.job_level
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-[#F4F6FB]">
       <div className="mx-auto max-w-4xl px-4 py-8">
 
         {/* Page header */}
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Self-Assessment</h1>
-            <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
+            <h1 className="text-2xl font-bold text-[#003087]">Self-Assessment</h1>
+            <div className="mt-1 flex items-center gap-2 text-sm text-[#6B7280]">
               <span>{profile.name}</span>
               {userFunction && (
                 <>
@@ -51,7 +51,7 @@ export default async function EmployeePage() {
           <form action={logout}>
             <button
               type="submit"
-              className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
             >
               Sign out
             </button>

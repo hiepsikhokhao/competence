@@ -5,16 +5,19 @@ import { login, type LoginState } from '@/app/actions/auth'
 
 const initialState: LoginState = null
 
+const inputCls =
+  'w-full rounded-md border border-[#CBD5E1] px-3 py-2 text-sm text-[#111827] ' +
+  'placeholder-[#9CA3AF] shadow-sm outline-none transition-colors ' +
+  'focus:border-[#0057D9] focus:ring-1 focus:ring-[#0057D9] ' +
+  'disabled:bg-gray-50 disabled:text-gray-400'
+
 export default function LoginForm() {
   const [state, formAction, pending] = useActionState(login, initialState)
 
   return (
     <form action={formAction} className="space-y-5">
       <div>
-        <label
-          htmlFor="email"
-          className="block text-sm font-medium text-gray-700 mb-1"
-        >
+        <label htmlFor="email" className="block text-sm font-medium text-[#111827] mb-1">
           Email address
         </label>
         <input
@@ -23,17 +26,14 @@ export default function LoginForm() {
           type="email"
           autoComplete="email"
           required
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
+          className={inputCls}
           placeholder="you@company.com"
           disabled={pending}
         />
       </div>
 
       <div>
-        <label
-          htmlFor="password"
-          className="block text-sm font-medium text-gray-700 mb-1"
-        >
+        <label htmlFor="password" className="block text-sm font-medium text-[#111827] mb-1">
           Password
         </label>
         <input
@@ -42,7 +42,7 @@ export default function LoginForm() {
           type="password"
           autoComplete="current-password"
           required
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
+          className={inputCls}
           placeholder="••••••••"
           disabled={pending}
         />
@@ -57,7 +57,7 @@ export default function LoginForm() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+        className="w-full rounded-md bg-[#0057D9] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#003087] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
       >
         {pending ? 'Signing in…' : 'Sign in'}
       </button>

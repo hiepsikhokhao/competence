@@ -86,5 +86,6 @@ export async function submitManagerReview(
   if (error) return { error: error.message }
 
   revalidatePath('/manager')
+  revalidatePath('/employee')  // employee can now see their gap results
   return {}
 }

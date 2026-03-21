@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from 'react'
 import { saveManagerScore, submitManagerReview } from '@/app/actions/manager'
-import { calcGap, PROFICIENCY_LABELS } from '@/lib/utils'
-import GapBadge from '@/components/gap/GapBadge'
+import { PROFICIENCY_LABELS } from '@/lib/utils'
 import type { ProficiencyLevel } from '@/lib/types'
 
 export type ReviewRow = {
   skill_id:       string
   skill_name:     string
+  definition:     string | null
+  levels:         { level: number; label: string | null; description: string | null }[]
   self_score:     ProficiencyLevel | null
   manager_score:  ProficiencyLevel | null
   required_level: ProficiencyLevel | null
@@ -21,15 +22,20 @@ type Props = {
 }
 
 export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
+  // Pre-fill manager score with self_score when no manager_score is saved yet
   const [scores, setScores] = useState<Record<string, ProficiencyLevel | null>>(
-    Object.fromEntries(rows.map((r) => [r.skill_id, r.manager_score]))
+    Object.fromEntries(rows.map((r) => [r.skill_id, r.manager_score ?? r.self_score]))
   )
-  const [saveError,   setSaveError]   = useState<string | null>(null)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [isSaving,    startSave]      = useTransition()
-  const [isSubmitting, startSubmit]   = useTransition()
+  const [saveError,    setSaveError]   = useState<string | null>(null)
+  const [submitError,  setSubmitError] = useState<string | null>(null)
+  const [isSaving,     startSave]      = useTransition()
+  const [isSubmitting, startSubmit]    = useTransition()
 
-  const allScored = rows.every((r) => scores[r.skill_id] != null)
+  const allScored   = rows.every((r) => scores[r.skill_id] != null)
+  const hasAdjusted = rows.some((r) => {
+    const ms = scores[r.skill_id]
+    return ms != null && r.self_score != null && ms !== r.self_score
+  })
 
   function handleScoreChange(skillId: string, score: ProficiencyLevel) {
     setScores((prev) => ({ ...prev, [skillId]: score }))
@@ -45,16 +51,22 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
     startSubmit(async () => {
       const result = await submitManagerReview(assessmentId)
       if (result?.error) setSubmitError(result.error)
-      // On success, revalidatePath('/manager') in the server action refreshes the page
     })
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Warning banner */}
+      {!isReviewed && hasAdjusted && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          You have adjusted scores. Please discuss with the employee before submitting.
+        </div>
+      )}
+
       {/* Save indicator */}
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end h-4">
         <span
-          className={['text-xs transition-opacity', isSaving ? 'text-indigo-500 opacity-100' : 'opacity-0'].join(' ')}
+          className={['text-xs transition-opacity', isSaving ? 'opacity-100 text-[#0057D9]' : 'opacity-0'].join(' ')}
           aria-live="polite"
         >
           Saving…
@@ -67,74 +79,74 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
         </p>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <th className="pb-3 pr-6">Skill</th>
-              <th className="pb-3 pr-6">Self Score</th>
-              <th className="pb-3 pr-6">Manager Score</th>
-              <th className="pb-3 pr-6">Standard</th>
-              <th className="pb-3">Gap</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {rows.map((row) => {
-              const managerScore = scores[row.skill_id]
-              const finalScore   = managerScore ?? row.self_score
-              const gap          = calcGap(finalScore ?? null, row.required_level)
+      {/* Skill cards */}
+      <div className="space-y-4">
+        {rows.map((row) => {
+          const currentScore = scores[row.skill_id]
+          return (
+            <div key={row.skill_id} className="rounded-lg border border-gray-200 bg-white p-4">
+              {/* Skill header */}
+              <div className="mb-3">
+                <p className="text-sm font-semibold text-gray-900">{row.skill_name}</p>
+                {row.definition && (
+                  <p className="mt-0.5 text-xs text-gray-500">{row.definition}</p>
+                )}
+                {row.self_score != null && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    Employee self-score:{' '}
+                    <span className="font-medium text-gray-700">
+                      {row.self_score} — {PROFICIENCY_LABELS[row.self_score]}
+                    </span>
+                  </p>
+                )}
+              </div>
 
-              return (
-                <tr key={row.skill_id}>
-                  <td className="py-3 pr-6 font-medium text-gray-900">{row.skill_name}</td>
+              {/* Level radio cards */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {([1, 2, 3, 4] as const).map((lvl) => {
+                  const levelData   = row.levels.find((l) => l.level === lvl)
+                  const label       = levelData?.label ?? PROFICIENCY_LABELS[lvl]
+                  const description = levelData?.description ?? null
+                  const checked     = currentScore === lvl
+                  const isSelfScore = row.self_score === lvl
 
-                  <td className="py-3 pr-6 text-gray-500">
-                    {row.self_score != null
-                      ? `${row.self_score} — ${PROFICIENCY_LABELS[row.self_score]}`
-                      : '—'}
-                  </td>
-
-                  <td className="py-3 pr-6">
-                    {isReviewed ? (
-                      <span className="text-gray-700">
-                        {managerScore != null
-                          ? `${managerScore} — ${PROFICIENCY_LABELS[managerScore]}`
-                          : '—'}
-                      </span>
-                    ) : (
-                      <select
-                        value={managerScore ?? ''}
-                        disabled={isSubmitting}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) as ProficiencyLevel
-                          if (val >= 1 && val <= 4) handleScoreChange(row.skill_id, val)
-                        }}
-                        className="rounded-md border border-gray-300 py-1 pl-2 pr-8 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none disabled:opacity-50"
-                      >
-                        <option value="">— Rate —</option>
-                        {([1, 2, 3, 4] as const).map((lvl) => (
-                          <option key={lvl} value={lvl}>
-                            {lvl} — {PROFICIENCY_LABELS[lvl]}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </td>
-
-                  <td className="py-3 pr-6 text-gray-500">
-                    {row.required_level != null
-                      ? `${row.required_level} — ${PROFICIENCY_LABELS[row.required_level]}`
-                      : '—'}
-                  </td>
-
-                  <td className="py-3">
-                    <GapBadge gap={gap} />
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                  return (
+                    <label
+                      key={lvl}
+                      className={[
+                        'relative flex cursor-pointer flex-col gap-1 rounded-lg border-2 p-3 transition-colors',
+                        isReviewed ? 'cursor-default' : 'hover:bg-blue-50',
+                        checked
+                          ? 'border-[#0057D9] bg-blue-50'
+                          : 'border-gray-200',
+                      ].join(' ')}
+                    >
+                      <input
+                        type="radio"
+                        name={`review-${row.skill_id}`}
+                        value={lvl}
+                        checked={checked}
+                        disabled={isReviewed || isSubmitting}
+                        onChange={() => !isReviewed && handleScoreChange(row.skill_id, lvl)}
+                        className="sr-only"
+                      />
+                      {isSelfScore && (
+                        <span className="absolute right-1.5 top-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 leading-none">
+                          Self
+                        </span>
+                      )}
+                      <span className="text-xs font-bold text-[#0057D9]">{lvl}</span>
+                      <span className="text-xs font-medium text-gray-800 leading-tight">{label}</span>
+                      {description && (
+                        <span className="text-xs text-gray-500 leading-tight">{description}</span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {!isReviewed && (
@@ -149,7 +161,7 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
               type="button"
               onClick={handleSubmit}
               disabled={!allScored || isSubmitting || isSaving}
-              className="rounded-md bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="rounded-md bg-[#0057D9] px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#003087] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isSubmitting ? 'Submitting…' : 'Submit Review'}
             </button>

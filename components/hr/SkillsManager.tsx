@@ -2,16 +2,24 @@
 
 import { useState, useTransition } from 'react'
 import { createSkill, updateSkill, deleteSkill, upsertStandard } from '@/app/actions/hr'
+import { PROFICIENCY_LABELS } from '@/lib/utils'
 import type { FunctionType, ProficiencyLevel } from '@/lib/types'
 
 const FUNCTIONS: FunctionType[] = ['UA', 'MKT', 'LiveOps']
 const LEVEL_LABELS: Record<number, string> = { 1: 'Basic', 2: 'Developing', 3: 'Proficient', 4: 'Expert' }
+
+type SkillLevel = {
+  level:       number
+  label:       string | null
+  description: string | null
+}
 
 type Skill = {
   id:         string
   name:       string
   definition: string | null
   function:   FunctionType
+  levels:     SkillLevel[]
 }
 
 type Props = {
@@ -23,13 +31,14 @@ type Props = {
 type View = 'skills' | 'matrix'
 
 export default function SkillsManager({ initialSkills, initialStandards, jobLevels }: Props) {
-  const [skills,    setSkills]    = useState<Skill[]>(initialSkills)
-  const [standards, setStandards] = useState(initialStandards)
-  const [view,      setView]      = useState<View>('skills')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState({ name: '', definition: '' })
-  const [error,     setError]     = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
+  const [skills,     setSkills]     = useState<Skill[]>(initialSkills)
+  const [standards,  setStandards]  = useState(initialStandards)
+  const [view,       setView]       = useState<View>('skills')
+  const [editingId,  setEditingId]  = useState<string | null>(null)
+  const [editDraft,  setEditDraft]  = useState({ name: '', definition: '' })
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [error,      setError]      = useState<string | null>(null)
+  const [isPending,  startTransition] = useTransition()
 
   // ── Add skill form ──────────────────────────────────────────────────────────
   const [addForm, setAddForm] = useState<{ name: string; definition: string; function: FunctionType }>({
@@ -47,7 +56,7 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
       })
       if (res.error) { setError(res.error); return }
       if (res.skill) {
-        setSkills((prev) => [...prev, res.skill!].sort((a, b) => {
+        setSkills((prev) => [...prev, { ...res.skill!, levels: [] }].sort((a, b) => {
           if (a.function !== b.function) return a.function.localeCompare(b.function)
           return a.name.localeCompare(b.name)
         }))
@@ -88,12 +97,12 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
         delete next[id]
         return next
       })
+      if (expandedId === id) setExpandedId(null)
     })
   }
 
   function handleStandardChange(skillId: string, jl: string, value: string) {
     const lvl = value === '' ? null : parseInt(value) as ProficiencyLevel
-    // Optimistic update
     setStandards((prev) => {
       const skillStd = { ...(prev[skillId] ?? {}) }
       if (lvl === null) delete skillStd[jl]
@@ -103,6 +112,10 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
     startTransition(async () => {
       await upsertStandard(skillId, jl, lvl)
     })
+  }
+
+  function toggleExpand(skillId: string) {
+    setExpandedId((prev) => (prev === skillId ? null : skillId))
   }
 
   return (
@@ -116,7 +129,7 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
             className={[
               'rounded-md px-4 py-2 text-sm font-medium capitalize',
               view === v
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-[#0057D9] text-white'
                 : 'border border-gray-300 text-gray-600 hover:bg-gray-50',
             ].join(' ')}
           >
@@ -142,26 +155,26 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
                 onChange={(e) => setAddForm((p) => ({ ...p, name: e.target.value }))}
                 onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
                 placeholder="Skill name"
-                className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-[#0057D9] focus:outline-none"
               />
               <input
                 type="text"
                 value={addForm.definition}
                 onChange={(e) => setAddForm((p) => ({ ...p, definition: e.target.value }))}
                 placeholder="Definition (optional)"
-                className="min-w-0 flex-[2] rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                className="min-w-0 flex-[2] rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-[#0057D9] focus:outline-none"
               />
               <select
                 value={addForm.function}
                 onChange={(e) => setAddForm((p) => ({ ...p, function: e.target.value as FunctionType }))}
-                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-[#0057D9] focus:outline-none"
               >
                 {FUNCTIONS.map((fn) => <option key={fn} value={fn}>{fn}</option>)}
               </select>
               <button
                 onClick={handleAdd}
                 disabled={isPending || !addForm.name.trim()}
-                className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                className="rounded-md bg-[#0057D9] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#003087] disabled:opacity-50"
               >
                 Add
               </button>
@@ -184,68 +197,113 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
                   <table className="min-w-full text-sm">
                     <tbody className="divide-y divide-gray-100">
                       {fnSkills.map((skill) => (
-                        <tr key={skill.id}>
-                          {editingId === skill.id ? (
-                            <>
-                              <td className="px-6 py-2.5">
-                                <input
-                                  type="text"
-                                  value={editDraft.name}
-                                  onChange={(e) => setEditDraft((p) => ({ ...p, name: e.target.value }))}
-                                  className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-indigo-400 focus:outline-none"
-                                />
+                        <>
+                          <tr key={skill.id}>
+                            {editingId === skill.id ? (
+                              <>
+                                <td className="px-6 py-2.5">
+                                  <input
+                                    type="text"
+                                    value={editDraft.name}
+                                    onChange={(e) => setEditDraft((p) => ({ ...p, name: e.target.value }))}
+                                    className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-[#0057D9] focus:outline-none"
+                                  />
+                                </td>
+                                <td className="px-6 py-2.5">
+                                  <input
+                                    type="text"
+                                    value={editDraft.definition}
+                                    onChange={(e) => setEditDraft((p) => ({ ...p, definition: e.target.value }))}
+                                    placeholder="Definition"
+                                    className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-[#0057D9] focus:outline-none"
+                                  />
+                                </td>
+                                <td className="px-6 py-2.5 text-right whitespace-nowrap">
+                                  <button
+                                    onClick={() => handleUpdate(skill.id)}
+                                    disabled={isPending}
+                                    className="mr-3 text-xs font-medium text-[#0057D9] hover:text-[#003087] disabled:opacity-50"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingId(null)}
+                                    className="text-xs text-gray-500 hover:text-gray-700"
+                                  >
+                                    Cancel
+                                  </button>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="w-1/3 px-6 py-3 font-medium text-gray-900">
+                                  <button
+                                    onClick={() => toggleExpand(skill.id)}
+                                    className="flex items-center gap-1.5 text-left hover:text-[#0057D9]"
+                                  >
+                                    <span className="text-gray-400 text-xs">
+                                      {expandedId === skill.id ? '▼' : '▶'}
+                                    </span>
+                                    {skill.name}
+                                  </button>
+                                </td>
+                                <td className="px-6 py-3 text-xs text-gray-500">
+                                  {skill.definition ?? '—'}
+                                </td>
+                                <td className="px-6 py-3 text-right whitespace-nowrap">
+                                  <button
+                                    onClick={() => startEdit(skill)}
+                                    className="mr-3 text-xs font-medium text-[#0057D9] hover:text-[#003087]"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(skill.id, skill.name)}
+                                    disabled={isPending}
+                                    className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
+                                  >
+                                    Delete
+                                  </button>
+                                </td>
+                              </>
+                            )}
+                          </tr>
+
+                          {/* Expanded: proficiency level descriptions */}
+                          {expandedId === skill.id && editingId !== skill.id && (
+                            <tr key={`${skill.id}-levels`}>
+                              <td colSpan={3} className="bg-gray-50 px-6 py-4">
+                                {skill.levels.length === 0 ? (
+                                  <p className="text-xs text-gray-400 italic">
+                                    No level descriptions defined for this skill.
+                                  </p>
+                                ) : (
+                                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                    {([1, 2, 3, 4] as const).map((lvl) => {
+                                      const ld = skill.levels.find((l) => l.level === lvl)
+                                      return (
+                                        <div
+                                          key={lvl}
+                                          className="rounded-lg border border-gray-200 bg-white p-3"
+                                        >
+                                          <p className="text-xs font-bold text-[#0057D9] mb-0.5">{lvl}</p>
+                                          <p className="text-xs font-medium text-gray-800 leading-tight">
+                                            {ld?.label ?? PROFICIENCY_LABELS[lvl]}
+                                          </p>
+                                          {ld?.description && (
+                                            <p className="mt-1 text-xs text-gray-500 leading-tight">
+                                              {ld.description}
+                                            </p>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
                               </td>
-                              <td className="px-6 py-2.5">
-                                <input
-                                  type="text"
-                                  value={editDraft.definition}
-                                  onChange={(e) => setEditDraft((p) => ({ ...p, definition: e.target.value }))}
-                                  placeholder="Definition"
-                                  className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-indigo-400 focus:outline-none"
-                                />
-                              </td>
-                              <td className="px-6 py-2.5 text-right whitespace-nowrap">
-                                <button
-                                  onClick={() => handleUpdate(skill.id)}
-                                  disabled={isPending}
-                                  className="mr-3 text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={() => setEditingId(null)}
-                                  className="text-xs text-gray-500 hover:text-gray-700"
-                                >
-                                  Cancel
-                                </button>
-                              </td>
-                            </>
-                          ) : (
-                            <>
-                              <td className="w-1/3 px-6 py-3 font-medium text-gray-900">
-                                {skill.name}
-                              </td>
-                              <td className="px-6 py-3 text-xs text-gray-500">
-                                {skill.definition ?? '—'}
-                              </td>
-                              <td className="px-6 py-3 text-right whitespace-nowrap">
-                                <button
-                                  onClick={() => startEdit(skill)}
-                                  className="mr-3 text-xs font-medium text-indigo-600 hover:text-indigo-800"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => handleDelete(skill.id, skill.name)}
-                                  disabled={isPending}
-                                  className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
-                                >
-                                  Delete
-                                </button>
-                              </td>
-                            </>
+                            </tr>
                           )}
-                        </tr>
+                        </>
                       ))}
                     </tbody>
                   </table>
@@ -295,7 +353,7 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
                               <select
                                 value={standards[skill.id]?.[jl] ?? ''}
                                 onChange={(e) => handleStandardChange(skill.id, jl, e.target.value)}
-                                className="w-full rounded border border-gray-200 px-1.5 py-1 text-xs text-gray-700 focus:border-indigo-400 focus:outline-none"
+                                className="w-full rounded border border-gray-200 px-1.5 py-1 text-xs text-gray-700 focus:border-[#0057D9] focus:outline-none"
                               >
                                 <option value="">—</option>
                                 {([1, 2, 3, 4] as const).map((lvl) => (

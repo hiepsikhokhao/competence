@@ -70,7 +70,7 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
   // ── Assessment (get or create) ────────────────────────────────────────────────
   let { data: assessment } = await supabase
     .from('assessments')
-    .select('id, self_status')
+    .select('id, self_status, manager_status')
     .eq('employee_id', userId)
     .maybeSingle()
 
@@ -78,7 +78,7 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
     const { data: created } = await supabase
       .from('assessments')
       .insert({ cycle_id: cycle.id, employee_id: userId })
-      .select('id, self_status')
+      .select('id, self_status, manager_status')
       .single()
     assessment = created
   }
@@ -119,7 +119,8 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
     levels:     skillLevelsMap[s.id] ?? [],
   }))
 
-  const isSubmitted = assessment?.self_status === 'submitted'
+  const isSubmitted       = assessment?.self_status   === 'submitted'
+  const isManagerReviewed = assessment?.manager_status === 'reviewed'
 
   // ── Guards ────────────────────────────────────────────────────────────────────
   if (!userFunction) {
@@ -161,22 +162,8 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-      {isSubmitted ? (
-        <>
-          <div className="mb-6 flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
-              <span className="size-1.5 rounded-full bg-green-500" />
-              Submitted
-            </span>
-            {!userJobLevel && (
-              <span className="text-xs text-amber-600">
-                Job level not set — gap calculations require it. Contact HR.
-              </span>
-            )}
-          </div>
-          <GapTable rows={gapRows} />
-        </>
-      ) : (
+      {/* State 1: not yet submitted → show form */}
+      {!isSubmitted && (
         <>
           <div className="mb-6 flex items-start justify-between">
             <div>
@@ -193,6 +180,39 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
             skills={skillsForForm}
             initialScores={initialScores}
           />
+        </>
+      )}
+
+      {/* State 2: submitted, awaiting manager */}
+      {isSubmitted && !isManagerReviewed && (
+        <div className="py-10 text-center">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-medium text-amber-700 mb-4">
+            <span className="size-1.5 rounded-full bg-amber-500" />
+            Submitted
+          </div>
+          <p className="text-base font-semibold text-gray-900">Awaiting line manager review</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Your self-assessment has been submitted. You'll be able to see your results once
+            your manager completes their review.
+          </p>
+        </div>
+      )}
+
+      {/* State 3: manager reviewed → show gap results */}
+      {isSubmitted && isManagerReviewed && (
+        <>
+          <div className="mb-6 flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
+              <span className="size-1.5 rounded-full bg-green-500" />
+              Review complete
+            </span>
+            {!userJobLevel && (
+              <span className="text-xs text-amber-600">
+                Job level not set — gap calculations require it. Contact HR.
+              </span>
+            )}
+          </div>
+          <GapTable rows={gapRows} />
         </>
       )}
     </div>

@@ -68,7 +68,7 @@ export default function TeamTable({ members }: Props) {
                 {member.assessment?.self_status === 'submitted' && (
                   <Link
                     href={`/manager?tab=team&employee=${member.id}`}
-                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                    className="text-xs font-medium text-[#0057D9] hover:text-[#003087]"
                   >
                     Review →
                   </Link>

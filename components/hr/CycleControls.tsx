@@ -30,12 +30,12 @@ export default function CycleControls({ cycleId, status }: Props) {
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Cycle name"
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-[#0057D9] focus:outline-none"
           />
           <button
             onClick={() => run(() => createCycle(newName))}
             disabled={isPending || !newName.trim()}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            className="rounded-md bg-[#0057D9] px-4 py-2 text-sm font-medium text-white hover:bg-[#003087] disabled:opacity-50"
           >
             {isPending ? 'Creating…' : 'Create Cycle'}
           </button>

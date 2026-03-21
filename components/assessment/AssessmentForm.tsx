@@ -26,13 +26,13 @@ type Props = {
 
 export default function AssessmentForm({ assessmentId, skills, initialScores }: Props) {
   const [scores, setScores] = useState<Record<string, ProficiencyLevel>>(initialScores)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [isSaving, startSave] = useTransition()
-  const [isSubmitting, startSubmit] = useTransition()
+  const [saveError,    setSaveError]   = useState<string | null>(null)
+  const [submitError,  setSubmitError] = useState<string | null>(null)
+  const [isSaving,     startSave]      = useTransition()
+  const [isSubmitting, startSubmit]    = useTransition()
 
   const ratedCount = skills.filter((s) => scores[s.id] != null).length
-  const allRated = ratedCount === skills.length && skills.length > 0
+  const allRated   = ratedCount === skills.length && skills.length > 0
 
   function handleScoreChange(skillId: string, score: number) {
     setScores((prev) => ({ ...prev, [skillId]: score as ProficiencyLevel }))
@@ -48,8 +48,6 @@ export default function AssessmentForm({ assessmentId, skills, initialScores }: 
     startSubmit(async () => {
       const result = await submitAssessment(assessmentId)
       if (result?.error) setSubmitError(result.error)
-      // On success, revalidatePath('/employee') in the server action causes Next.js
-      // to return an updated RSC payload, swapping this form for GapTable.
     })
   }
 
@@ -66,7 +64,7 @@ export default function AssessmentForm({ assessmentId, skills, initialScores }: 
         <span
           className={[
             'text-xs transition-opacity',
-            isSaving ? 'text-indigo-500 opacity-100' : 'opacity-0',
+            isSaving ? 'text-[#0057D9] opacity-100' : 'opacity-0',
           ].join(' ')}
           aria-live="polite"
         >
@@ -108,7 +106,7 @@ export default function AssessmentForm({ assessmentId, skills, initialScores }: 
           type="button"
           onClick={handleSubmit}
           disabled={!allRated || isSubmitting || isSaving}
-          className="rounded-md bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="rounded-md bg-[#0057D9] px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#003087] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isSubmitting ? 'Submitting…' : 'Submit Assessment'}
         </button>
