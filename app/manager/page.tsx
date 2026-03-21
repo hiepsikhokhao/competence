@@ -42,7 +42,7 @@ export default async function ManagerPage({
   if (tab === 'team') {
     const { data: membersData } = await supabase
       .from('users')
-      .select('id, name, email, role, dept, function, job_level, manager_id, created_at')
+      .select('id, name, email, username, role, dept, function, job_level, manager_id, created_at')
       .eq('manager_id', user.id)
       .order('name')
 

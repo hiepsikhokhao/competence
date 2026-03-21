@@ -1,37 +1,36 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Competency Assessment Tool — VNGGames POC
 -- Run against a fresh Supabase project (SQL Editor → Run, or supabase db reset).
+--
+-- Dependency order:
+--   1. Enums
+--   2. users table (structure only — no RLS yet)
+--   3. handle_new_user() trigger
+--   4. current_user_role() function  ← queries users; defined before any RLS policy
+--   5. users RLS policies            ← now safe: current_user_role() exists
+--   6. Remaining tables + their RLS policies (each in dependency order)
+--   7. Indexes
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- ── Enums ─────────────────────────────────────────────────────────────────────
 
-create type public.user_role     as enum ('employee', 'manager', 'hr');
-create type public.function_type as enum ('UA', 'MKT', 'LiveOps');
-create type public.self_status   as enum ('not_started', 'draft', 'submitted');
+-- ── 1. Enums ───────────────────────────────────────────────────────────────────
+
+create type public.user_role      as enum ('employee', 'manager', 'hr');
+create type public.function_type  as enum ('UA', 'MKT', 'LiveOps');
+create type public.self_status    as enum ('not_started', 'draft', 'submitted');
 create type public.manager_status as enum ('pending', 'reviewed');
-create type public.cycle_status  as enum ('open', 'closed');
+create type public.cycle_status   as enum ('open', 'closed');
 
--- ── Helper: current user role ─────────────────────────────────────────────────
--- Security-definer so policies don't need a per-row sub-select.
 
-create or replace function public.current_user_role()
-returns public.user_role
-language sql stable security definer
-set search_path = public
-as $$
-  select role from public.users where id = auth.uid();
-$$;
-
--- ── users ─────────────────────────────────────────────────────────────────────
--- Mirrors auth.users; one row per authenticated user.
--- Note: job_level is nullable here to allow the auth trigger to insert without it;
--- HR sets it via CSV import or the Users tab.
+-- ── 2. users table (structure only) ───────────────────────────────────────────
+-- RLS policies are added in step 5, after current_user_role() is defined.
 
 create table public.users (
   id         uuid primary key references auth.users (id) on delete cascade,
   name       text not null,
   email      text not null unique,
-  role       public.user_role     not null default 'employee',
+  username   text unique,           -- e.g. 'annv' extracted from 'annv@vng.com.vn'
+  role       public.user_role      not null default 'employee',
   dept       text,
   function   public.function_type,
   job_level  text,
@@ -39,15 +38,20 @@ create table public.users (
   created_at timestamptz not null default now()
 );
 
--- Auto-create a users row when someone signs up
+
+-- ── 3. handle_new_user() trigger ───────────────────────────────────────────────
+-- Auto-creates a users row on Supabase Auth signup.
+-- Extracts username from the email local-part (e.g. 'annv@vng.com.vn' → 'annv').
+
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.users (id, name, email)
+  insert into public.users (id, name, email, username)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
-    new.email
+    new.email,
+    split_part(new.email, '@', 1)
   );
   return new;
 end;
@@ -57,27 +61,48 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- RLS
+
+-- ── 4. current_user_role() ─────────────────────────────────────────────────────
+-- Security-definer helper so RLS policies avoid per-row sub-selects.
+-- Must be defined AFTER the users table and BEFORE any policy that calls it.
+
+create or replace function public.current_user_role()
+returns public.user_role
+language sql stable security definer
+set search_path = public
+as $$
+  select role from public.users where id = auth.uid();
+$$;
+
+
+-- ── 5. users RLS policies ──────────────────────────────────────────────────────
+
 alter table public.users enable row level security;
 
+-- Any authenticated user can read the full users table (needed for manager lookups)
 create policy "users: authenticated can read all"
   on public.users for select
   to authenticated
   using (true);
 
+-- Each user can update their own row (covers username, display name, etc.)
 create policy "users: own row update"
   on public.users for update
   to authenticated
-  using (id = auth.uid())
+  using     (id = auth.uid())
   with check (id = auth.uid());
 
+-- HR can insert, update, and delete any user row
 create policy "users: hr full access"
   on public.users for all
   to authenticated
-  using  (public.current_user_role() = 'hr')
+  using     (public.current_user_role() = 'hr')
   with check (public.current_user_role() = 'hr');
 
--- ── skills ────────────────────────────────────────────────────────────────────
+
+-- ── 6. Remaining tables + RLS ──────────────────────────────────────────────────
+
+-- ── skills ─────────────────────────────────────────────────────────────────────
 
 create table public.skills (
   id         uuid primary key default gen_random_uuid(),
@@ -95,10 +120,10 @@ create policy "skills: authenticated can read"
 create policy "skills: hr full access"
   on public.skills for all
   to authenticated
-  using  (public.current_user_role() = 'hr')
+  using     (public.current_user_role() = 'hr')
   with check (public.current_user_role() = 'hr');
 
--- ── skill_levels ──────────────────────────────────────────────────────────────
+-- ── skill_levels ───────────────────────────────────────────────────────────────
 -- Describes what each of the 4 proficiency levels means for a given skill.
 
 create table public.skill_levels (
@@ -119,10 +144,10 @@ create policy "skill_levels: authenticated can read"
 create policy "skill_levels: hr full access"
   on public.skill_levels for all
   to authenticated
-  using  (public.current_user_role() = 'hr')
+  using     (public.current_user_role() = 'hr')
   with check (public.current_user_role() = 'hr');
 
--- ── skill_standards ───────────────────────────────────────────────────────────
+-- ── skill_standards ────────────────────────────────────────────────────────────
 -- Required proficiency level per skill per job level.
 -- Gap = final_score - required_level.
 
@@ -142,10 +167,10 @@ create policy "skill_standards: authenticated can read"
 create policy "skill_standards: hr full access"
   on public.skill_standards for all
   to authenticated
-  using  (public.current_user_role() = 'hr')
+  using     (public.current_user_role() = 'hr')
   with check (public.current_user_role() = 'hr');
 
--- ── cycle ─────────────────────────────────────────────────────────────────────
+-- ── cycle ──────────────────────────────────────────────────────────────────────
 -- Single assessment cycle for this POC; HR opens and closes it.
 
 create table public.cycle (
@@ -165,21 +190,21 @@ create policy "cycle: authenticated can read"
 create policy "cycle: hr full access"
   on public.cycle for all
   to authenticated
-  using  (public.current_user_role() = 'hr')
+  using     (public.current_user_role() = 'hr')
   with check (public.current_user_role() = 'hr');
 
--- ── assessments ───────────────────────────────────────────────────────────────
+-- ── assessments ────────────────────────────────────────────────────────────────
 -- One record per employee (unique on employee_id — single-cycle POC).
 
 create table public.assessments (
   id                  uuid primary key default gen_random_uuid(),
-  cycle_id            uuid not null references public.cycle (id) on delete cascade,
-  employee_id         uuid not null references public.users (id) on delete cascade,
+  cycle_id            uuid not null references public.cycle (id)  on delete cascade,
+  employee_id         uuid not null references public.users (id)  on delete cascade,
   self_status         public.self_status    not null default 'not_started',
   manager_status      public.manager_status not null default 'pending',
   self_submitted_at   timestamptz,
   manager_reviewed_at timestamptz,
-  unique (employee_id)          -- single cycle: one assessment per employee
+  unique (employee_id)   -- single cycle: one assessment per employee
 );
 
 alter table public.assessments enable row level security;
@@ -188,7 +213,7 @@ alter table public.assessments enable row level security;
 create policy "assessments: employee own"
   on public.assessments for all
   to authenticated
-  using  (employee_id = auth.uid())
+  using     (employee_id = auth.uid())
   with check (employee_id = auth.uid());
 
 -- Managers: read assessments of direct reports
@@ -215,16 +240,16 @@ create policy "assessments: manager updates reports"
 create policy "assessments: hr full access"
   on public.assessments for all
   to authenticated
-  using  (public.current_user_role() = 'hr')
+  using     (public.current_user_role() = 'hr')
   with check (public.current_user_role() = 'hr');
 
--- ── assessment_scores ─────────────────────────────────────────────────────────
+-- ── assessment_scores ──────────────────────────────────────────────────────────
 -- One row per (assessment, skill). final_score is computed: manager_score if set,
 -- otherwise self_score. Gap is calculated in application code (final_score - required_level).
 
 create table public.assessment_scores (
   assessment_id uuid not null references public.assessments (id) on delete cascade,
-  skill_id      uuid not null references public.skills (id)      on delete cascade,
+  skill_id      uuid not null references public.skills (id)       on delete cascade,
   self_score    int check (self_score    between 1 and 4),
   manager_score int check (manager_score between 1 and 4),
   final_score   int generated always as (coalesce(manager_score, self_score)) stored,
@@ -233,7 +258,7 @@ create table public.assessment_scores (
 
 alter table public.assessment_scores enable row level security;
 
--- Employees: read/write own scores while self_status is not submitted
+-- Employees: read own scores
 create policy "scores: employee reads own"
   on public.assessment_scores for select
   to authenticated
@@ -243,6 +268,7 @@ create policy "scores: employee reads own"
     )
   );
 
+-- Employees: insert scores while assessment is not yet submitted
 create policy "scores: employee inserts own"
   on public.assessment_scores for insert
   to authenticated
@@ -254,6 +280,7 @@ create policy "scores: employee inserts own"
     )
   );
 
+-- Employees: update scores while assessment is not yet submitted
 create policy "scores: employee updates own"
   on public.assessment_scores for update
   to authenticated
@@ -303,14 +330,16 @@ create policy "scores: manager updates reports"
 create policy "scores: hr full access"
   on public.assessment_scores for all
   to authenticated
-  using  (public.current_user_role() = 'hr')
+  using     (public.current_user_role() = 'hr')
   with check (public.current_user_role() = 'hr');
 
--- ── Indexes ───────────────────────────────────────────────────────────────────
+
+-- ── 7. Indexes ─────────────────────────────────────────────────────────────────
 
 create index on public.users (manager_id);
 create index on public.users (function);
 create index on public.users (job_level);
+create index on public.users (username);
 create index on public.skills (function);
 create index on public.skill_standards (job_level);
 create index on public.assessments (cycle_id);

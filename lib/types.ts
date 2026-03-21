@@ -17,6 +17,7 @@ export type User = {
   id:         string
   name:       string
   email:      string
+  username:   string | null
   role:       UserRole
   dept:       string | null
   function:   FunctionType | null

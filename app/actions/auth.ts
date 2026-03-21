@@ -35,12 +35,28 @@ export async function login(
     return { error: signInError.message }
   }
 
+  // ── Get the verified auth user so we have the uid for the profile query ──────
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  console.log('[login] getUser result:', { uid: user?.id ?? null, userError })
+
+  if (userError || !user) {
+    console.error('[login] getUser failed:', userError)
+    return { error: 'Could not verify session. Please try again.' }
+  }
+
+  // ── Fetch profile row — must filter by id, otherwise .single() blows up
+  //    when the "authenticated can read all" RLS policy returns every row ────────
+  console.log('[login] querying users where id =', user.id)
   const { data: profile, error: profileError } = await supabase
     .from('users')
     .select('role')
+    .eq('id', user.id)
     .single()
 
+  console.log('[login] profile query response:', { profile, profileError })
+
   if (profileError || !profile) {
+    console.error('[login] profile fetch failed:', profileError)
     return { error: 'Could not load user profile. Please contact support.' }
   }
 
