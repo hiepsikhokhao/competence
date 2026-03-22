@@ -1,4 +1,11 @@
+import { clsx, type ClassValue } from 'clsx'
 import type { ProficiencyLevel } from './types'
+
+// ── Tailwind class merge helper ────────────────────────────────────────────────
+// Simple cn without tailwind-merge (no shadcn ui components are used in our app)
+export function cn(...inputs: ClassValue[]) {
+  return clsx(inputs)
+}
 
 // ── Gap calculation ───────────────────────────────────────────────────────────
 
