@@ -23,7 +23,7 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
   const cycle = cycles?.[0] ?? null
 
   // ── Skills for this user's function ──────────────────────────────────────────
-  let skills: { id: string; name: string; definition: string | null }[] = []
+  let skills: { id: string; name: string; definition: string | null; importance?: number | null }[] = []
   let skillLevelsMap: Record<
     string,
     { level: number; label: string | null; description: string | null }[]
@@ -33,7 +33,7 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
   if (userFunction) {
     const { data: skillsData } = await supabase
       .from('skills')
-      .select('id, name, definition')
+      .select('id, name, definition, importance')
       .eq('function', userFunction)
       .order('name')
 
@@ -84,12 +84,12 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
   }
 
   // ── Existing scores ───────────────────────────────────────────────────────────
-  let scoresData: { skill_id: string; self_score: number | null; final_score: number | null }[] = []
+  let scoresData: { skill_id: string; self_score: number | null; manager_score: number | null; final_score: number | null }[] = []
 
   if (assessment) {
     const { data } = await supabase
       .from('assessment_scores')
-      .select('skill_id, self_score, final_score')
+      .select('skill_id, self_score, manager_score, final_score')
       .eq('assessment_id', assessment.id)
     scoresData = data ?? []
   }
@@ -106,9 +106,11 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
     return {
       skill_id:       s.id,
       skill_name:     s.name,
-      self_score:     (score?.self_score  ?? null) as ProficiencyLevel | null,
-      final_score:    (score?.final_score ?? null) as ProficiencyLevel | null,
+      self_score:     (score?.self_score    ?? null) as ProficiencyLevel | null,
+      manager_score:  (score?.manager_score ?? null) as ProficiencyLevel | null,
+      final_score:    (score?.final_score   ?? null) as ProficiencyLevel | null,
       required_level: standardsMap[s.id] ?? null,
+      importance:     s.importance ?? null,
     }
   })
 

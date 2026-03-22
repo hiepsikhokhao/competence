@@ -31,6 +31,7 @@ export type Skill = {
   name:       string
   definition: string | null
   function:   FunctionType
+  importance?: number | null  // 1 = low, 2 = medium, 3 = high
 }
 
 export type SkillLevel = {
@@ -103,7 +104,7 @@ export interface Database {
       }
       skills: {
         Row:           Skill
-        Insert:        Omit<Skill, 'id'>
+        Insert:        Omit<Skill, 'id'> & { importance?: number | null }
         Update:        Partial<Omit<Skill, 'id'>>
         Relationships: []
       }

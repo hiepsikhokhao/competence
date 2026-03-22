@@ -18,39 +18,53 @@ type Props = {
   scores: Record<string, ProficiencyLevel | null>
 }
 
-function gapColor(gap: number | null): string {
-  if (gap == null) return 'text-gray-400 bg-white'
-  if (gap > 0)     return 'text-green-700 bg-green-50'
-  if (gap === 0)   return 'text-gray-600 bg-gray-100'
-  return 'text-red-700 bg-red-50'
-}
-
-function gapLabel(gap: number | null): string {
-  if (gap == null) return '—'
-  if (gap > 0)     return `+${gap}`
-  return String(gap)
+function GapChip({ gap }: { gap: number | null }) {
+  const cls =
+    gap == null  ? 'text-gray-400 bg-white' :
+    gap > 0      ? 'text-green-700 bg-green-50' :
+    gap === 0    ? 'text-gray-600 bg-gray-100'  :
+                   'text-red-700 bg-red-50'
+  const label =
+    gap == null  ? '—' :
+    gap > 0      ? `+${gap}` :
+    String(gap)
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+      {label}
+    </span>
+  )
 }
 
 export default function ReviewGapAnalysis({ rows, scores }: Props) {
-  // Build per-row derived values
   const analysisRows = rows.map((row) => {
-    const managerScore = scores[row.skill_id] ?? null
-    const finalScore   = (managerScore ?? row.self_score) as ProficiencyLevel | null
-    const gap =
-      finalScore != null && row.required_level != null
-        ? finalScore - row.required_level
+    const managerScore  = scores[row.skill_id] ?? null
+    const finalScore    = (managerScore ?? row.self_score) as ProficiencyLevel | null
+    const standardScore =
+      row.required_level != null && row.importance != null
+        ? row.required_level * row.importance
         : null
-    return { ...row, managerScore, finalScore, gap }
+    const actualScore =
+      finalScore != null && row.importance != null
+        ? finalScore * row.importance
+        : null
+    const gap =
+      actualScore != null && standardScore != null
+        ? actualScore - standardScore
+        : null
+    return { ...row, managerScore, finalScore, standardScore, actualScore, gap }
   })
 
-  // Radar chart data — truncate long skill names for readability
-  const radarData = analysisRows.map((r) => ({
-    skill:      r.skill_name.length > 14 ? r.skill_name.slice(0, 13) + '…' : r.skill_name,
-    'Final Score': r.finalScore ?? 0,
-    'Required':    r.required_level ?? 0,
-  }))
+  const totalStandard = analysisRows.reduce((s, r) => s + (r.standardScore ?? 0), 0)
+  const totalActual   = analysisRows.reduce((s, r) => s + (r.actualScore   ?? 0), 0)
+  const totalGap      = analysisRows.reduce((s, r) => s + (r.gap           ?? 0), 0)
+  const hasWeighted   = analysisRows.some((r) => r.standardScore != null)
 
   const hasRequiredLevels = rows.some((r) => r.required_level != null)
+  const radarData = analysisRows.map((r) => ({
+    skill:      r.skill_name.length > 14 ? r.skill_name.slice(0, 13) + '…' : r.skill_name,
+    'Actual':   r.finalScore    ?? 0,
+    'Standard': r.required_level ?? 0,
+  }))
 
   return (
     <div className="mt-8 space-y-6 border-t border-gray-200 pt-6">
@@ -61,11 +75,14 @@ export default function ReviewGapAnalysis({ rows, scores }: Props) {
         <table className="min-w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <th className="px-4 py-3">Skill</th>
-              <th className="px-4 py-3">Self Score</th>
-              <th className="px-4 py-3">Manager Score</th>
-              <th className="px-4 py-3">Standard</th>
-              <th className="px-4 py-3">Gap</th>
+              <th className="px-4 py-3 whitespace-nowrap">Skill</th>
+              <th className="px-4 py-3 whitespace-nowrap">Self Score</th>
+              <th className="px-4 py-3 whitespace-nowrap">Manager Score</th>
+              <th className="px-4 py-3 whitespace-nowrap">Standard</th>
+              <th className="px-4 py-3 whitespace-nowrap text-center">Importance</th>
+              <th className="px-4 py-3 whitespace-nowrap text-right">Standard Score</th>
+              <th className="px-4 py-3 whitespace-nowrap text-right">Actual Score</th>
+              <th className="px-4 py-3 whitespace-nowrap text-center">Gap</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -74,31 +91,58 @@ export default function ReviewGapAnalysis({ rows, scores }: Props) {
                 <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
                   {row.skill_name}
                 </td>
-                <td className="px-4 py-3 text-gray-500">
+                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                   {row.self_score != null
                     ? `${row.self_score} — ${PROFICIENCY_LABELS[row.self_score]}`
                     : '—'}
                 </td>
-                <td className="px-4 py-3 text-gray-700">
-                  {row.managerScore != null
-                    ? `${row.managerScore} — ${PROFICIENCY_LABELS[row.managerScore]}`
-                    : '—'}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {row.managerScore != null ? (
+                    <span className={row.managerScore !== row.self_score ? 'font-medium text-[#003087]' : 'text-gray-600'}>
+                      {row.managerScore} — {PROFICIENCY_LABELS[row.managerScore]}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
                 </td>
-                <td className="px-4 py-3 text-gray-500">
+                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                   {row.required_level != null
                     ? `${row.required_level} — ${PROFICIENCY_LABELS[row.required_level]}`
                     : '—'}
                 </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${gapColor(row.gap)}`}
-                  >
-                    {gapLabel(row.gap)}
-                  </span>
+                <td className="px-4 py-3 text-center">
+                  {row.importance != null ? (
+                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                      {row.importance}
+                    </span>
+                  ) : (
+                    <span className="text-gray-300">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right text-gray-600 tabular-nums">
+                  {row.standardScore ?? '—'}
+                </td>
+                <td className="px-4 py-3 text-right text-gray-700 tabular-nums font-medium">
+                  {row.actualScore ?? '—'}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <GapChip gap={row.gap} />
                 </td>
               </tr>
             ))}
           </tbody>
+          {hasWeighted && (
+            <tfoot>
+              <tr className="border-t-2 border-gray-300 bg-gray-50 text-xs font-semibold text-gray-700">
+                <td className="px-4 py-3" colSpan={5}>Total</td>
+                <td className="px-4 py-3 text-right tabular-nums">{totalStandard}</td>
+                <td className="px-4 py-3 text-right tabular-nums font-bold">{totalActual}</td>
+                <td className="px-4 py-3 text-center">
+                  <GapChip gap={totalGap} />
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
@@ -111,10 +155,7 @@ export default function ReviewGapAnalysis({ rows, scores }: Props) {
           <ResponsiveContainer width="100%" height={320}>
             <RadarChart data={radarData}>
               <PolarGrid stroke="#E5E7EB" />
-              <PolarAngleAxis
-                dataKey="skill"
-                tick={{ fontSize: 11, fill: '#374151' }}
-              />
+              <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: '#374151' }} />
               <PolarRadiusAxis
                 domain={[0, 4]}
                 tickCount={5}
@@ -122,26 +163,23 @@ export default function ReviewGapAnalysis({ rows, scores }: Props) {
                 axisLine={false}
               />
               <Radar
-                name="Final Score"
-                dataKey="Final Score"
-                stroke="#0057D9"
-                fill="#0057D9"
-                fillOpacity={0.25}
-                strokeWidth={2}
-              />
-              <Radar
-                name="Required"
-                dataKey="Required"
+                name="Standard"
+                dataKey="Standard"
                 stroke="#F97316"
                 fill="#F97316"
                 fillOpacity={0.12}
                 strokeWidth={2}
                 strokeDasharray="4 3"
               />
-              <Legend
-                iconSize={10}
-                wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+              <Radar
+                name="Actual"
+                dataKey="Actual"
+                stroke="#0057D9"
+                fill="#0057D9"
+                fillOpacity={0.25}
+                strokeWidth={2}
               />
+              <Legend iconSize={10} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
             </RadarChart>
           </ResponsiveContainer>
         </div>

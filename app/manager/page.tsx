@@ -91,7 +91,7 @@ export default async function ManagerPage({
     if (employeeFunction) {
       const { data: skillsData } = await supabase
         .from('skills')
-        .select('id, name, definition')
+        .select('id, name, definition, importance')
         .eq('function', employeeFunction)
         .order('name')
 
@@ -139,6 +139,7 @@ export default async function ManagerPage({
           self_score:     (scoresMap[s.id]?.self_score    ?? null) as ProficiencyLevel | null,
           manager_score:  (scoresMap[s.id]?.manager_score ?? null) as ProficiencyLevel | null,
           required_level: standardsMap[s.id] ?? null,
+          importance:     s.importance ?? null,
         }))
       }
     }

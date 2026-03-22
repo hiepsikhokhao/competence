@@ -14,6 +14,7 @@ export type ReviewRow = {
   self_score:     ProficiencyLevel | null
   manager_score:  ProficiencyLevel | null
   required_level: ProficiencyLevel | null
+  importance:     number | null
 }
 
 type Props = {
