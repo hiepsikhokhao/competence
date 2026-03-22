@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { saveManagerScore, submitManagerReview } from '@/app/actions/manager'
 import { PROFICIENCY_LABELS } from '@/lib/utils'
+import ReviewGapAnalysis from './ReviewGapAnalysis'
 import type { ProficiencyLevel } from '@/lib/types'
 
 export type ReviewRow = {
@@ -172,6 +173,11 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
             )}
           </div>
         </>
+      )}
+
+      {/* Gap table + radar chart — shown after review is submitted */}
+      {isReviewed && (
+        <ReviewGapAnalysis rows={rows} scores={scores} />
       )}
     </div>
   )
