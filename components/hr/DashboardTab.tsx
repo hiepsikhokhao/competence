@@ -22,14 +22,14 @@ export default async function DashboardTab({ drillFn }: Props) {
     supabase.from('users').select('id, name, function, job_level').eq('role', 'employee'),
     supabase.from('assessments').select('id, employee_id, self_status, manager_status'),
     supabase.from('assessment_scores').select('assessment_id, skill_id, final_score'),
-    supabase.from('skills').select('id, name, function').order('name'),
+    supabase.from('skills').select('id, name, function, importance').order('name'),
     supabase.from('skill_standards').select('skill_id, job_level, required_level'),
   ])
 
   const users     = usersRes.data   ?? []
   const asmts     = assRes.data     ?? []
   const scores    = scoresRes.data  ?? []
-  const skills    = skillsRes.data  ?? []
+  const skills    = (skillsRes.data ?? []) as { id: string; name: string; function: string; importance: number | null }[]
   const standards = stdRes.data     ?? []
 
   const assmtByEmployee = Object.fromEntries(asmts.map((a) => [a.employee_id, a]))
@@ -67,7 +67,11 @@ export default async function DashboardTab({ drillFn }: Props) {
     const required = stdMap[`${sc.skill_id}:${u.job_level}`]
     if (required == null) continue
 
-    const gap = sc.final_score - required
+    const importance = skill.importance ?? null
+    // Weighted gap: (final_score × importance) - (required_level × importance)
+    const gap = importance != null
+      ? (sc.final_score * importance) - (required * importance)
+      : sc.final_score - required
     heatmap[fn][sc.skill_id]               ??= {}
     heatmap[fn][sc.skill_id][u.job_level]  ??= { sum: 0, count: 0 }
     heatmap[fn][sc.skill_id][u.job_level].sum   += gap
@@ -257,7 +261,7 @@ export default async function DashboardTab({ drillFn }: Props) {
                 </table>
               </div>
               <p className="mt-1 text-right text-xs text-gray-400">
-                Cell = avg gap (final − standard). Hover for n.
+                Cell = avg weighted gap ((final×imp) − (standard×imp)). Hover for n.
               </p>
             </div>
           )

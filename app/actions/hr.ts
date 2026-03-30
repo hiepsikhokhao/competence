@@ -203,6 +203,71 @@ export async function deleteSkill(
   } catch (e) { return { error: (e as Error).message } }
 }
 
+// ── Assessment revert ─────────────────────────────────────────────────────────
+
+export async function revertAssessment(
+  assessmentId: string,
+  stage: 'manager' | 'self',
+): Promise<{ error?: string }> {
+  try {
+    const supabase = await requireHr()
+
+    if (stage === 'manager') {
+      const { error } = await supabase
+        .from('assessments')
+        .update({ manager_status: 'pending', manager_reviewed_at: null })
+        .eq('id', assessmentId)
+        .eq('manager_status', 'reviewed')
+      if (error) return { error: error.message }
+    } else {
+      const { error } = await supabase
+        .from('assessments')
+        .update({ self_status: 'draft', self_submitted_at: null })
+        .eq('id', assessmentId)
+        .eq('self_status', 'submitted')
+      if (error) return { error: error.message }
+    }
+
+    revalidateAll()
+    return {}
+  } catch (e) { return { error: (e as Error).message } }
+}
+
+// ── Skill levels ──────────────────────────────────────────────────────────────
+
+export async function upsertSkillLevel(
+  skillId: string,
+  level: ProficiencyLevel,
+  patch: { label?: string | null; description?: string | null },
+): Promise<{ error?: string }> {
+  try {
+    const supabase = await requireHr()
+    // Use raw upsert via RPC-like approach: update if exists, insert if not
+    const { data: existing } = await supabase
+      .from('skill_levels')
+      .select('id')
+      .eq('skill_id', skillId)
+      .eq('level', level)
+      .maybeSingle()
+
+    if (existing) {
+      const { error } = await supabase
+        .from('skill_levels')
+        .update(patch)
+        .eq('id', existing.id)
+      if (error) return { error: error.message }
+    } else {
+      const { error } = await supabase
+        .from('skill_levels')
+        .insert({ skill_id: skillId, level, label: null, description: patch.description ?? null })
+      if (error) return { error: error.message }
+    }
+
+    revalidateAll()
+    return {}
+  } catch (e) { return { error: (e as Error).message } }
+}
+
 // ── Skill standards ───────────────────────────────────────────────────────────
 
 export async function upsertStandard(

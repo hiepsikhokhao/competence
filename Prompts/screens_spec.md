@@ -36,8 +36,33 @@
 - Save draft button
 - If any manager score differs from self score → show warning banner:
   "You have adjusted scores. Please discuss with employee before submitting."
-- Submit review button → locks form, gap finalized
+- After manager clicks Submit review → lock all inputs
+- Then display on the same page:
+-  1. Gap table
+    COLUMNS: Skill | Self Score | Manager Score | Standard | Importance | Standard Score | Actual Score | Gap
 
+    CALCULATIONS:
+    - Standard = required_level from skill_standards (based on employee's job_level)
+    - Importance = importance column from skills table (1, 2, or 3)
+    - Standard Score = required_level × importance
+    - Actual Score = final_score × importance  
+      (final_score = manager_score if set, else self_score)
+    - Gap = Actual Score - Standard Score
+    - Last row: show totals for Standard Score, Actual Score, Gap columns only
+
+  COLOR CODE the Gap cell:
+  - Gap > 0 → green
+  - Gap = 0 → grey
+  - Gap < 0 → red
+
+- 2. RADAR CHART (recharts RadarChart):
+    Show 2 lines: "Standard" (required_level) vs "Actual" (final_score)
+    One point per skill on the radar axes
+    Keep it simple, no importance weighting on chart
+
+Apply this gap table to:
+1. Employee results page (shown after manager_status = 'reviewed')
+2. Manager employee detail view (shown after manager submits review)
 ---
 
 ### HR Admin `/hr`

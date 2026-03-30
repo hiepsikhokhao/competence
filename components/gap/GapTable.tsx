@@ -9,7 +9,6 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts'
-import { PROFICIENCY_LABELS } from '@/lib/utils'
 import type { ProficiencyLevel } from '@/lib/types'
 
 export type GapRow = {
@@ -24,14 +23,18 @@ export type GapRow = {
 
 // ── Derived calculations ──────────────────────────────────────────────────────
 
-function computeRow(row: GapRow) {
+function computeRow(row: GapRow, managerReviewed: boolean) {
+  // When pending: base actual score on self_score only (manager hasn't scored yet).
+  // When reviewed: use final_score (= manager_score ?? self_score from DB).
+  const effectiveScore = managerReviewed ? row.final_score : row.self_score
+
   const standardScore =
     row.required_level != null && row.importance != null
       ? row.required_level * row.importance
       : null
   const actualScore =
-    row.final_score != null && row.importance != null
-      ? row.final_score * row.importance
+    effectiveScore != null && row.importance != null
+      ? effectiveScore * row.importance
       : null
   const gap =
     actualScore != null && standardScore != null
@@ -59,16 +62,55 @@ function GapChip({ gap }: { gap: number | null }) {
   )
 }
 
+// ── Manager score cell ────────────────────────────────────────────────────────
+// When pending: always "—" (manager hasn't scored yet).
+// When reviewed: show manager_score with colour highlight if it differs from self_score.
+
+function ManagerScoreCell({ row, managerReviewed }: { row: GapRow; managerReviewed: boolean }) {
+  if (!managerReviewed) return <span className="text-gray-400">—</span>
+
+  const score = row.manager_score ?? row.self_score
+  if (score == null) return <span className="text-gray-400">—</span>
+
+  const hasDiff =
+    row.manager_score != null &&
+    row.self_score    != null &&
+    row.manager_score !== row.self_score
+
+  if (!hasDiff) return <span className="text-gray-600">{score}</span>
+
+  const cls = row.manager_score! > row.self_score!
+    ? 'inline-flex items-center rounded px-2 py-0.5 bg-green-100 text-green-700 font-semibold text-xs'
+    : 'inline-flex items-center rounded px-2 py-0.5 bg-red-100 text-red-700 font-semibold text-xs'
+
+  return <span className={cls}>{score}</span>
+}
+
+// ── Shared cell class helpers ─────────────────────────────────────────────────
+
+const TH  = 'px-4 py-3 whitespace-nowrap border-r border-[#E5E7EB]'
+const THL = `${TH} text-left`
+const THC = `${TH} text-center`
+const TH_LAST = 'px-4 py-3 whitespace-nowrap text-center'  // no right border
+
+const TD  = 'px-4 py-3 border-r border-[#E5E7EB]'
+const TDL = `${TD} whitespace-nowrap`
+const TDC = `${TD} text-center whitespace-nowrap tabular-nums`
+const TD_LAST = 'px-4 py-3 text-center'
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-type Props = { rows: GapRow[] }
+type Props = {
+  rows:            GapRow[]
+  managerReviewed: boolean   // controls Manager Score display + Actual Score source
+}
 
-export default function GapTable({ rows }: Props) {
+export default function GapTable({ rows, managerReviewed }: Props) {
   if (rows.length === 0) {
     return <p className="text-sm text-gray-500 text-center py-8">No scores to display.</p>
   }
 
-  const computed = rows.map(computeRow)
+  const computed = rows.map((r) => computeRow(r, managerReviewed))
 
   // Totals
   const totalStandard = computed.reduce((s, r) => s + (r.standardScore ?? 0), 0)
@@ -76,13 +118,14 @@ export default function GapTable({ rows }: Props) {
   const totalGap      = computed.reduce((s, r) => s + (r.gap           ?? 0), 0)
   const hasWeighted   = computed.some((r) => r.standardScore != null)
 
-  // Radar data (no importance weighting — raw proficiency levels)
+  // Radar data — weighted scores (×importance per spec v1.2)
   const hasRequired = rows.some((r) => r.required_level != null)
   const radarData   = computed.map((r) => ({
     skill:      r.skill_name.length > 14 ? r.skill_name.slice(0, 13) + '…' : r.skill_name,
-    'Actual':   r.final_score    ?? 0,
-    'Standard': r.required_level ?? 0,
+    'Actual':   r.actualScore   ?? 0,
+    'Standard': r.standardScore ?? 0,
   }))
+  const radarMax = Math.max(...radarData.flatMap((d) => [d['Actual'], d['Standard']]), 4)
 
   return (
     <div className="space-y-6">
@@ -90,43 +133,33 @@ export default function GapTable({ rows }: Props) {
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <th className="px-4 py-3 whitespace-nowrap">Skill</th>
-              <th className="px-4 py-3 whitespace-nowrap">Self Score</th>
-              <th className="px-4 py-3 whitespace-nowrap">Manager Score</th>
-              <th className="px-4 py-3 whitespace-nowrap">Standard</th>
-              <th className="px-4 py-3 whitespace-nowrap text-center">Importance</th>
-              <th className="px-4 py-3 whitespace-nowrap text-right">Standard Score</th>
-              <th className="px-4 py-3 whitespace-nowrap text-right">Actual Score</th>
-              <th className="px-4 py-3 whitespace-nowrap text-center">Gap</th>
+            <tr className="border-b border-gray-200 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <th className={THL}>Skill</th>
+              <th className={THC}>Self Score</th>
+              <th className={THC}>Manager Score</th>
+              <th className={THC}>Standard</th>
+              <th className={THC}>Importance</th>
+              <th className={THC}>Standard Score</th>
+              <th className={THC}>Actual Score</th>
+              <th className={TH_LAST}>Gap</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {computed.map((row) => (
               <tr key={row.skill_id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                <td className={`${TDL} font-medium text-gray-900`}>
                   {row.skill_name}
                 </td>
-                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                  {row.self_score != null
-                    ? `${row.self_score} — ${PROFICIENCY_LABELS[row.self_score]}`
-                    : '—'}
+                <td className={`${TDC} text-gray-500`}>
+                  {row.self_score ?? '—'}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  {row.manager_score != null ? (
-                    <span className={row.manager_score !== row.self_score ? 'font-medium text-[#003087]' : 'text-gray-600'}>
-                      {row.manager_score} — {PROFICIENCY_LABELS[row.manager_score]}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
+                <td className={TDC}>
+                  <ManagerScoreCell row={row} managerReviewed={managerReviewed} />
                 </td>
-                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                  {row.required_level != null
-                    ? `${row.required_level} — ${PROFICIENCY_LABELS[row.required_level]}`
-                    : '—'}
+                <td className={`${TDC} text-gray-500`}>
+                  {row.required_level ?? '—'}
                 </td>
-                <td className="px-4 py-3 text-center">
+                <td className={TDC}>
                   {row.importance != null ? (
                     <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
                       {row.importance}
@@ -135,13 +168,13 @@ export default function GapTable({ rows }: Props) {
                     <span className="text-gray-300">—</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-right text-gray-600 tabular-nums">
+                <td className={`${TDC} text-gray-600`}>
                   {row.standardScore ?? '—'}
                 </td>
-                <td className="px-4 py-3 text-right text-gray-700 tabular-nums font-medium">
+                <td className={`${TDC} text-gray-700 font-medium`}>
                   {row.actualScore ?? '—'}
                 </td>
-                <td className="px-4 py-3 text-center">
+                <td className={TD_LAST}>
                   <GapChip gap={row.gap} />
                 </td>
               </tr>
@@ -151,10 +184,10 @@ export default function GapTable({ rows }: Props) {
           {hasWeighted && (
             <tfoot>
               <tr className="border-t-2 border-gray-300 bg-gray-50 text-xs font-semibold text-gray-700">
-                <td className="px-4 py-3" colSpan={5}>Total</td>
-                <td className="px-4 py-3 text-right tabular-nums">{totalStandard}</td>
-                <td className="px-4 py-3 text-right tabular-nums font-bold">{totalActual}</td>
-                <td className="px-4 py-3 text-center">
+                <td className={`${TDL} py-3`} colSpan={5}>Total</td>
+                <td className={`${TDC}`}>{totalStandard}</td>
+                <td className={`${TDC} font-bold`}>{totalActual}</td>
+                <td className={TD_LAST}>
                   <GapChip gap={totalGap} />
                 </td>
               </tr>
@@ -174,7 +207,7 @@ export default function GapTable({ rows }: Props) {
               <PolarGrid stroke="#E5E7EB" />
               <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: '#374151' }} />
               <PolarRadiusAxis
-                domain={[0, 4]}
+                domain={[0, radarMax]}
                 tickCount={5}
                 tick={{ fontSize: 9, fill: '#9CA3AF' }}
                 axisLine={false}

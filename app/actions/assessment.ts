@@ -47,6 +47,39 @@ export async function saveScore(
   return {}
 }
 
+// ── Save evidence / example text for a single skill ──────────────────────────
+
+export async function saveEvidence(
+  assessmentId: string,
+  skillId: string,
+  evidence: string,
+): Promise<{ error?: string }> {
+  const supabase = await createServerSupabaseClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { data: assessment } = await supabase
+    .from('assessments')
+    .select('id, self_status, employee_id')
+    .eq('id', assessmentId)
+    .eq('employee_id', user.id)
+    .single()
+
+  if (!assessment) return { error: 'Assessment not found' }
+  if (assessment.self_status === 'submitted') return { error: 'Assessment already submitted' }
+
+  const { error: upsertError } = await supabase
+    .from('assessment_scores')
+    .upsert(
+      { assessment_id: assessmentId, skill_id: skillId, evidence: evidence || null },
+      { onConflict: 'assessment_id,skill_id' },
+    )
+
+  if (upsertError) return { error: upsertError.message }
+  return {}
+}
+
 // ── Submit assessment (lock form, trigger results view) ───────────────────────
 
 export async function submitAssessment(

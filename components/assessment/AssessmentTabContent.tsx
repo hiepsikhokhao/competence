@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import AssessmentForm from './AssessmentForm'
 import GapTable from '@/components/gap/GapTable'
@@ -8,47 +9,56 @@ type Props = {
   userId:       string
   userFunction: FunctionType | null
   userJobLevel: string | null
+  baseUrl:      string                 // e.g. '/employee' or '/manager?tab=assessment&atab'
+  activeTab:    'assessment' | 'result'
+  showTabBar?:  boolean                // default true
 }
 
-export default async function AssessmentTabContent({ userId, userFunction, userJobLevel }: Props) {
+export default async function AssessmentTabContent({
+  userId,
+  userFunction,
+  userJobLevel,
+  baseUrl,
+  activeTab,
+  showTabBar = true,
+}: Props) {
   const supabase = await createServerSupabaseClient()
 
   // ── Active cycle ─────────────────────────────────────────────────────────────
   const { data: cycles } = await supabase
     .from('cycle')
-    .select('id, name, status')
-    .eq('status', 'open')
+    .select('id, name')
     .limit(1)
 
   const cycle = cycles?.[0] ?? null
 
   // ── Skills for this user's function ──────────────────────────────────────────
-  let skills: { id: string; name: string; definition: string | null; importance?: number | null }[] = []
+  let skills: { id: string; name: string; definition: string | null; definition_en: string | null; definition_vi: string | null; importance?: number | null }[] = []
   let skillLevelsMap: Record<
     string,
-    { level: number; label: string | null; description: string | null }[]
+    { level: number; label: string | null; description: string | null; description_en: string | null; description_vi: string | null }[]
   > = {}
   let standardsMap: Record<string, ProficiencyLevel> = {}
 
   if (userFunction) {
     const { data: skillsData } = await supabase
       .from('skills')
-      .select('id, name, definition, importance')
+      .select('id, name, definition, definition_en, definition_vi, importance')
       .eq('function', userFunction)
       .order('name')
 
-    skills = skillsData ?? []
+    skills = (skillsData as any) ?? []
 
     if (skills.length > 0) {
       const skillIds = skills.map((s) => s.id)
 
       const { data: levelsData } = await supabase
         .from('skill_levels')
-        .select('skill_id, level, label, description')
+        .select('skill_id, level, label, description, description_en, description_vi')
         .in('skill_id', skillIds)
         .order('level')
 
-      for (const l of levelsData ?? []) {
+      for (const l of (levelsData as any) ?? []) {
         skillLevelsMap[l.skill_id] ??= []
         skillLevelsMap[l.skill_id].push(l)
       }
@@ -68,11 +78,21 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
   }
 
   // ── Assessment (get or create) ────────────────────────────────────────────────
-  let { data: assessment } = await supabase
-    .from('assessments')
-    .select('id, self_status, manager_status')
-    .eq('employee_id', userId)
-    .maybeSingle()
+  // Filter by cycle_id so we always get the assessment for the current open cycle,
+  // not a stale one from a previous cycle (which would cause maybeSingle to fail
+  // with multiple rows and return null, leading to empty scores).
+  let { data: assessment } = cycle
+    ? await supabase
+        .from('assessments')
+        .select('id, self_status, manager_status')
+        .eq('employee_id', userId)
+        .eq('cycle_id', cycle.id)
+        .maybeSingle()
+    : await supabase
+        .from('assessments')
+        .select('id, self_status, manager_status')
+        .eq('employee_id', userId)
+        .maybeSingle()
 
   if (!assessment && cycle) {
     const { data: created } = await supabase
@@ -83,22 +103,28 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
     assessment = created
   }
 
-  // ── Existing scores ───────────────────────────────────────────────────────────
-  let scoresData: { skill_id: string; self_score: number | null; manager_score: number | null; final_score: number | null }[] = []
+  // ── Existing scores + evidence ────────────────────────────────────────────────
+  let scoresData: {
+    skill_id: string
+    self_score: number | null
+    manager_score: number | null
+    final_score: number | null
+    evidence: string | null
+  }[] = []
 
   if (assessment) {
     const { data } = await supabase
       .from('assessment_scores')
-      .select('skill_id, self_score, manager_score, final_score')
+      .select('skill_id, self_score, manager_score, final_score, evidence')
       .eq('assessment_id', assessment.id)
-    scoresData = data ?? []
+    scoresData = (data ?? []) as typeof scoresData
   }
 
   const initialScores: Record<string, ProficiencyLevel> = {}
+  const initialEvidence: Record<string, string> = {}
   for (const s of scoresData) {
-    if (s.self_score != null) {
-      initialScores[s.skill_id] = s.self_score as ProficiencyLevel
-    }
+    if (s.self_score != null) initialScores[s.skill_id] = s.self_score as ProficiencyLevel
+    if (s.evidence) initialEvidence[s.skill_id] = s.evidence
   }
 
   const gapRows: GapRow[] = skills.map((s) => {
@@ -115,13 +141,15 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
   })
 
   const skillsForForm = skills.map((s) => ({
-    id:         s.id,
-    name:       s.name,
-    definition: s.definition,
-    levels:     skillLevelsMap[s.id] ?? [],
+    id:            s.id,
+    name:          s.name,
+    definition:    s.definition,
+    definition_en: s.definition_en,
+    definition_vi: s.definition_vi,
+    levels:        skillLevelsMap[s.id] ?? [],
   }))
 
-  const isSubmitted       = assessment?.self_status   === 'submitted'
+  const isSubmitted       = assessment?.self_status    === 'submitted'
   const isManagerReviewed = assessment?.manager_status === 'reviewed'
 
   // ── Guards ────────────────────────────────────────────────────────────────────
@@ -130,15 +158,6 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
       <Notice
         type="warning"
         message="Your function is not set. Contact HR to complete your profile."
-      />
-    )
-  }
-
-  if (!cycle) {
-    return (
-      <Notice
-        type="info"
-        message="The assessment cycle is not currently open. Check back later."
       />
     )
   }
@@ -161,60 +180,119 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
     )
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Tab bar ───────────────────────────────────────────────────────────────────
+  // baseUrl examples: '/employee' → links become '/employee?tab=assessment'
+  const tabBar = showTabBar ? (
+    <div className="mb-6 flex gap-1 border-b border-gray-200">
+      <TabLink
+        href={`${baseUrl}?tab=assessment`}
+        active={activeTab === 'assessment'}
+        label="My Assessment"
+      />
+      <TabLink
+        href={`${baseUrl}?tab=result`}
+        active={activeTab === 'result'}
+        label="My Result"
+      />
+    </div>
+  ) : null
+
+  // ── My Assessment tab ─────────────────────────────────────────────────────────
+  if (activeTab === 'assessment') {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        {tabBar}
+
+        {/* Title + status */}
+        <div className="mb-5 flex items-start justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">
+              Game Publishing Functional Competency — Self-Assessment
+            </h2>
+            {cycle?.name && <p className="mt-0.5 text-xs text-gray-500">{cycle.name}</p>}
+          </div>
+          <StatusPill status={assessment.self_status} />
+        </div>
+
+        {/* Instruction block — always visible */}
+        <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-800 space-y-1">
+          <p>Read each competency and its proficiency levels, select the level that best reflects your performance in recent months (typically 3–6 months).</p>
+          <p>Rate based on your consistent performance (not occasional or best-case situations).</p>
+          <p>If your capability falls between two levels, select the lower level.</p>
+        </div>
+
+        {isSubmitted && (
+          <div className="mb-5 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+            Your self-assessment has been submitted and is now read-only. View your current results in the My Result tab.
+          </div>
+        )}
+
+        <AssessmentForm
+          assessmentId={assessment.id}
+          skills={skillsForForm}
+          initialScores={initialScores}
+          initialEvidence={initialEvidence}
+          standards={standardsMap}
+          readOnly={isSubmitted}
+        />
+      </div>
+    )
+  }
+
+  // ── My Result tab ─────────────────────────────────────────────────────────────
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-      {/* State 1: not yet submitted → show form */}
-      {!isSubmitted && (
-        <>
-          <div className="mb-6 flex items-start justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-gray-900">{cycle.name}</h2>
-              <p className="mt-0.5 text-sm text-gray-500">
-                Rate your proficiency for each skill in your function.
-                Changes are saved automatically.
-              </p>
-            </div>
-            <StatusPill status={assessment.self_status} />
-          </div>
-          <AssessmentForm
-            assessmentId={assessment.id}
-            skills={skillsForForm}
-            initialScores={initialScores}
-          />
-        </>
-      )}
+      {tabBar}
 
-      {/* State 2: submitted, awaiting manager */}
-      {isSubmitted && !isManagerReviewed && (
+      {!isSubmitted ? (
+        // Not yet submitted — prompt to submit first
         <div className="py-10 text-center">
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-medium text-amber-700 mb-4">
-            <span className="size-1.5 rounded-full bg-amber-500" />
-            Submitted
-          </div>
-          <p className="text-base font-semibold text-gray-900">Awaiting line manager review</p>
+          <p className="text-base font-semibold text-gray-900">Submit your assessment first</p>
           <p className="mt-1 text-sm text-gray-500">
-            Your self-assessment has been submitted. You'll be able to see your results once
-            your manager completes their review.
+            Results will appear here once you submit your self-assessment.
           </p>
         </div>
-      )}
-
-      {/* State 3: manager reviewed → show gap results */}
-      {isSubmitted && isManagerReviewed && (
+      ) : (
         <>
-          <div className="mb-6 flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
-              <span className="size-1.5 rounded-full bg-green-500" />
-              Review complete
-            </span>
-            {!userJobLevel && (
-              <span className="text-xs text-amber-600">
-                Job level not set — gap calculations require it. Contact HR.
+          {/* Title + status badge */}
+          <div className="mb-4 flex items-center gap-3">
+            <h2 className="text-base font-semibold text-gray-900">
+              Game Publishing Functional Competency — My Result
+            </h2>
+            {isManagerReviewed ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
+                <span className="size-1.5 rounded-full bg-green-500" />
+                Review complete
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                <span className="size-1.5 rounded-full bg-amber-500" />
+                Awaiting manager review
               </span>
             )}
           </div>
-          <GapTable rows={gapRows} />
+
+          {/* Pending notice banner */}
+          {!isManagerReviewed && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Awaiting line manager review. Results below are based on your self-assessment.
+            </div>
+          )}
+
+          {!userJobLevel && (
+            <p className="mb-4 text-xs text-amber-600">
+              Job level not set — gap calculations require it. Contact HR.
+            </p>
+          )}
+
+          <GapTable rows={gapRows} managerReviewed={isManagerReviewed} />
+
+          {/* Disclaimer when pending */}
+          {!isManagerReviewed && (
+            <p className="mt-2 text-xs italic text-gray-400">
+              * Scores may be adjusted after manager review
+            </p>
+          )}
         </>
       )}
     </div>
@@ -222,6 +300,22 @@ export default async function AssessmentTabContent({ userId, userFunction, userJ
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
+
+function TabLink({ href, active, label }: { href: string; active: boolean; label: string }) {
+  return (
+    <Link
+      href={href}
+      className={[
+        'px-4 py-2.5 text-sm font-medium border-b-2 transition-colors',
+        active
+          ? 'border-[#0057D9] text-[#0057D9]'
+          : 'border-transparent text-gray-500 hover:text-gray-700',
+      ].join(' ')}
+    >
+      {label}
+    </Link>
+  )
+}
 
 function Notice({ type, message }: { type: 'info' | 'warning' | 'error'; message: string }) {
   const styles = {

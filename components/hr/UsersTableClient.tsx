@@ -1,18 +1,20 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { updateUserManager } from '@/app/actions/hr'
+import { updateUserManager, revertAssessment } from '@/app/actions/hr'
 import type { FunctionType } from '@/lib/types'
 
 type UserRow = {
-  id:         string
-  name:       string
-  email:      string
-  role:       string
-  function:   string | null
-  job_level:  string | null
-  dept:       string | null
-  manager_id: string | null
+  id:             string
+  name:           string
+  email:          string
+  username:       string | null
+  role:           string
+  function:       string | null
+  job_level:      string | null
+  dept:           string | null
+  manager_id:     string | null
+  assessment_id:  string | null
   self_status:    string | null
   manager_status: string | null
 }
@@ -28,15 +30,24 @@ const FUNCTIONS: (FunctionType | '')[] = ['', 'UA', 'MKT', 'LiveOps']
 const ROLES = ['', 'employee', 'manager', 'hr']
 
 export default function UsersTableClient({ users, managers }: Props) {
-  const [filterFn,   setFilterFn]   = useState('')
-  const [filterRole, setFilterRole] = useState('')
-  const [savingId,   setSavingId]   = useState<string | null>(null)
-  const [errors,     setErrors]     = useState<Record<string, string>>({})
+  const [filterFn,    setFilterFn]    = useState('')
+  const [filterRole,  setFilterRole]  = useState('')
+  const [search,      setSearch]      = useState('')
+  const [savingId,    setSavingId]    = useState<string | null>(null)
+  const [revertingId, setRevertingId] = useState<string | null>(null)
+  const [errors,      setErrors]      = useState<Record<string, string>>({})
   const [, startTransition] = useTransition()
 
   const filtered = users.filter((u) => {
-    if (filterFn   && u.function !== filterFn)   return false
-    if (filterRole && u.role     !== filterRole)  return false
+    if (filterFn   && u.function !== filterFn)  return false
+    if (filterRole && u.role     !== filterRole) return false
+    if (search) {
+      const q = search.toLowerCase()
+      const matchName  = u.name.toLowerCase().includes(q)
+      const matchUser  = (u.username ?? '').toLowerCase().includes(q)
+      const matchEmail = u.email.toLowerCase().includes(q)
+      if (!matchName && !matchUser && !matchEmail) return false
+    }
     return true
   })
 
@@ -51,10 +62,53 @@ export default function UsersTableClient({ users, managers }: Props) {
     })
   }
 
+  function handleRevert(user: UserRow) {
+    if (!user.assessment_id) return
+
+    // Determine what can be reverted
+    const canRevertManager = user.manager_status === 'reviewed'
+    const canRevertSelf    = user.self_status === 'submitted' && !canRevertManager
+
+    let stage: 'manager' | 'self'
+    let confirmMsg: string
+
+    if (canRevertManager) {
+      stage = 'manager'
+      confirmMsg = `Revert manager review for ${user.name}?\nThis will unlock the manager form (manager_status → pending).`
+    } else if (canRevertSelf) {
+      stage = 'self'
+      confirmMsg = `Revert self-assessment for ${user.name}?\nThis will unlock the employee form (self_status → draft).`
+    } else {
+      return
+    }
+
+    if (!confirm(confirmMsg)) return
+
+    setRevertingId(user.id)
+    setErrors((prev) => { const n = { ...prev }; delete n[user.id + '-revert']; return n })
+    startTransition(async () => {
+      const res = await revertAssessment(user.assessment_id!, stage)
+      setRevertingId(null)
+      if (res?.error) setErrors((prev) => ({ ...prev, [user.id + '-revert']: res.error! }))
+    })
+  }
+
+  function canRevert(u: UserRow): boolean {
+    return u.assessment_id != null &&
+      (u.manager_status === 'reviewed' || u.self_status === 'submitted')
+  }
+
   return (
     <div className="space-y-3">
-      {/* Filters */}
+      {/* Filters + search */}
       <div className="flex items-center gap-3 flex-wrap">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or username…"
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:border-[#0057D9] focus:outline-none min-w-[220px]"
+        />
         <select
           value={filterFn}
           onChange={(e) => setFilterFn(e.target.value)}
@@ -84,27 +138,33 @@ export default function UsersTableClient({ users, managers }: Props) {
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                <th className="px-6 py-3">Name</th>
-                <th className="px-6 py-3">Email</th>
-                <th className="px-6 py-3">Role</th>
-                <th className="px-6 py-3">Function</th>
-                <th className="px-6 py-3">Level</th>
-                <th className="px-6 py-3">Dept</th>
-                <th className="px-6 py-3">Manager</th>
-                <th className="px-6 py-3">Self</th>
-                <th className="px-6 py-3">Review</th>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Function</th>
+                <th className="px-4 py-3">Level</th>
+                <th className="px-4 py-3">Dept</th>
+                <th className="px-4 py-3">Manager</th>
+                <th className="px-4 py-3">Self</th>
+                <th className="px-4 py-3">Review</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map((u) => (
                 <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-3 font-medium text-gray-900 whitespace-nowrap">{u.name}</td>
-                  <td className="px-6 py-3 text-xs text-gray-500">{u.email}</td>
-                  <td className="px-6 py-3"><RoleBadge role={u.role} /></td>
-                  <td className="px-6 py-3 text-gray-600">{u.function ?? '—'}</td>
-                  <td className="px-6 py-3 text-gray-600">{u.job_level ?? '—'}</td>
-                  <td className="px-6 py-3 text-gray-500">{u.dept ?? '—'}</td>
-                  <td className="px-6 py-3">
+                  <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                    <div>{u.name}</div>
+                    {u.username && (
+                      <div className="text-[10px] text-gray-400">{u.username}</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{u.email}</td>
+                  <td className="px-4 py-3"><RoleBadge role={u.role} /></td>
+                  <td className="px-4 py-3 text-gray-600">{u.function ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-600">{u.job_level ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-500">{u.dept ?? '—'}</td>
+                  <td className="px-4 py-3">
                     <div className="flex flex-col gap-0.5">
                       <select
                         defaultValue={u.manager_id ?? ''}
@@ -125,21 +185,37 @@ export default function UsersTableClient({ users, managers }: Props) {
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-3">
+                  <td className="px-4 py-3">
                     {u.self_status
                       ? <StatusPill s={u.self_status} type="self" />
                       : <span className="text-xs text-gray-300">—</span>}
                   </td>
-                  <td className="px-6 py-3">
+                  <td className="px-4 py-3">
                     {u.manager_status
                       ? <StatusPill s={u.manager_status} type="manager" />
                       : <span className="text-xs text-gray-300">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {canRevert(u) && (
+                      <div className="flex flex-col gap-0.5">
+                        <button
+                          onClick={() => handleRevert(u)}
+                          disabled={revertingId === u.id}
+                          className="text-xs font-medium text-amber-600 hover:text-amber-800 disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {revertingId === u.id ? 'Reverting…' : '↩ Revert'}
+                        </button>
+                        {errors[u.id + '-revert'] && (
+                          <span className="text-[10px] text-red-500">{errors[u.id + '-revert']}</span>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-8 text-center text-sm text-gray-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-gray-400">
                     No users match the selected filters.
                   </td>
                 </tr>

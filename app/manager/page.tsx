@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import { logout } from '@/app/actions/auth'
 import AssessmentTabContent from '@/components/assessment/AssessmentTabContent'
+import LanguageToggle from '@/components/LanguageToggle'
+import { LangProvider } from '@/lib/lang-context'
 import TabBar from '@/components/manager/TabBar'
 import TeamTable from '@/components/manager/TeamTable'
 import ReviewForm from '@/components/manager/ReviewForm'
@@ -91,19 +93,19 @@ export default async function ManagerPage({
     if (employeeFunction) {
       const { data: skillsData } = await supabase
         .from('skills')
-        .select('id, name, definition, importance')
+        .select('id, name, definition, definition_en, definition_vi, importance')
         .eq('function', employeeFunction)
         .order('name')
 
-      const skills = skillsData ?? []
+      const skills = (skillsData as any[]) ?? []
 
       if (skills.length > 0) {
-        const skillIds = skills.map((s) => s.id)
+        const skillIds = skills.map((s: any) => s.id)
 
         const [scoresResult, standardsResult, levelsResult] = await Promise.all([
           supabase
             .from('assessment_scores')
-            .select('skill_id, self_score, manager_score')
+            .select('skill_id, self_score, manager_score, evidence')
             .eq('assessment_id', assessment.id),
           member.job_level
             ? supabase
@@ -114,7 +116,7 @@ export default async function ManagerPage({
             : Promise.resolve({ data: [] as { skill_id: string; required_level: number }[] | null }),
           supabase
             .from('skill_levels')
-            .select('skill_id, level, label, description')
+            .select('skill_id, level, label, description, description_en, description_vi')
             .in('skill_id', skillIds)
             .order('level'),
         ])
@@ -124,20 +126,22 @@ export default async function ManagerPage({
           (standardsResult.data ?? []).map((s) => [s.skill_id, s.required_level as ProficiencyLevel])
         )
 
-        // Build skill_levels map: skillId → sorted level rows
-        const levelsMap: Record<string, { level: number; label: string | null; description: string | null }[]> = {}
-        for (const l of levelsResult.data ?? []) {
+        const levelsMap: Record<string, { level: number; label: string | null; description: string | null; description_en: string | null; description_vi: string | null }[]> = {}
+        for (const l of (levelsResult.data as any) ?? []) {
           levelsMap[l.skill_id] ??= []
           levelsMap[l.skill_id].push(l)
         }
 
-        reviewRows = skills.map((s) => ({
+        reviewRows = skills.map((s: any) => ({
           skill_id:       s.id,
           skill_name:     s.name,
           definition:     s.definition,
+          definition_en:  (s as any).definition_en ?? null,
+          definition_vi:  (s as any).definition_vi ?? null,
           levels:         levelsMap[s.id] ?? [],
           self_score:     (scoresMap[s.id]?.self_score    ?? null) as ProficiencyLevel | null,
           manager_score:  (scoresMap[s.id]?.manager_score ?? null) as ProficiencyLevel | null,
+          evidence:       (scoresMap[s.id]?.evidence      ?? null) as string | null,
           required_level: standardsMap[s.id] ?? null,
           importance:     s.importance ?? null,
         }))
@@ -178,6 +182,7 @@ export default async function ManagerPage({
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-[#F4F6FB]">
+      <LangProvider>
       <div className="mx-auto max-w-4xl px-4 py-8">
 
         {/* Page header */}
@@ -195,36 +200,73 @@ export default async function ManagerPage({
             </div>
           </div>
 
-          <form action={logout}>
-            <button
-              type="submit"
-              className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-            >
-              Sign out
-            </button>
-          </form>
+          <div className="flex items-center gap-3">
+            <LanguageToggle />
+            <form action={logout}>
+              <button
+                type="submit"
+                className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
 
         <TabBar
           tabs={[
             { id: 'assessment', label: 'My Assessment', href: '/manager?tab=assessment' },
+            { id: 'result',     label: 'My Result',     href: '/manager?tab=result'     },
             { id: 'team',       label: 'My Team',       href: '/manager?tab=team'       },
           ]}
           currentTab={tab}
         />
 
+        {/* My Assessment tab */}
         {tab === 'assessment' && (
           <AssessmentTabContent
             userId={user.id}
             userFunction={userFunction}
             userJobLevel={userJobLevel}
+            baseUrl="/manager"
+            activeTab="assessment"
+            showTabBar={false}
           />
         )}
 
-        {tab === 'team' && (
-          employeeId ? reviewContent : <TeamTable members={teamMembers} />
+        {/* My Result tab */}
+        {tab === 'result' && (
+          <AssessmentTabContent
+            userId={user.id}
+            userFunction={userFunction}
+            userJobLevel={userJobLevel}
+            baseUrl="/manager"
+            activeTab="result"
+            showTabBar={false}
+          />
         )}
+
+        {/* My Team tab */}
+        {tab === 'team' && !employeeId && (
+          <div className="space-y-6">
+            {/* Instruction block */}
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <p className="mb-1 text-sm font-semibold text-gray-800">
+                Game Publishing Functional Competency — Line Manager Assessment
+              </p>
+              <div className="mt-3 space-y-1 text-xs text-gray-600">
+                <p>Review each competency and assess based on the employee's performance in recent months (typically 3–6 months).</p>
+                <p>The displayed ratings reflect the employee's self-assessment for your reference.</p>
+                <p>Rate based on consistent performance; if between two levels, select the lower level.</p>
+              </div>
+            </div>
+            <TeamTable members={teamMembers} />
+          </div>
+        )}
+
+        {tab === 'team' && employeeId && reviewContent}
       </div>
+      </LangProvider>
     </main>
   )
 }

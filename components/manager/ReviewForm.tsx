@@ -4,17 +4,21 @@ import { useState, useTransition } from 'react'
 import { saveManagerScore, submitManagerReview } from '@/app/actions/manager'
 import { PROFICIENCY_LABELS } from '@/lib/utils'
 import ReviewGapAnalysis from './ReviewGapAnalysis'
+import { useLang } from '@/lib/hooks/useLang'
 import type { ProficiencyLevel } from '@/lib/types'
 
 export type ReviewRow = {
   skill_id:       string
   skill_name:     string
   definition:     string | null
-  levels:         { level: number; label: string | null; description: string | null }[]
+  definition_en:  string | null
+  definition_vi:  string | null
+  levels:         { level: number; label: string | null; description: string | null; description_en: string | null; description_vi: string | null }[]
   self_score:     ProficiencyLevel | null
   manager_score:  ProficiencyLevel | null
   required_level: ProficiencyLevel | null
   importance:     number | null
+  evidence:       string | null
 }
 
 type Props = {
@@ -24,6 +28,8 @@ type Props = {
 }
 
 export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
+  const [lang] = useLang()
+
   // Pre-fill manager score with self_score when no manager_score is saved yet
   const [scores, setScores] = useState<Record<string, ProficiencyLevel | null>>(
     Object.fromEntries(rows.map((r) => [r.skill_id, r.manager_score ?? r.self_score]))
@@ -91,7 +97,7 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
               <div className="mb-3">
                 <p className="text-sm font-semibold text-gray-900">{row.skill_name}</p>
                 {row.definition && (
-                  <p className="mt-0.5 text-xs text-gray-500">{row.definition}</p>
+                  <p className="mt-0.5 text-xs text-gray-500">{lang === 'en' ? (row.definition_en ?? row.definition) : (row.definition_vi ?? row.definition)}</p>
                 )}
                 {row.self_score != null && (
                   <p className="mt-1.5 text-xs text-gray-500">
@@ -101,6 +107,11 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
                     </span>
                   </p>
                 )}
+                {row.evidence && (
+                  <p className="mt-1 text-xs italic text-gray-400">
+                    Employee&apos;s evidence: {row.evidence}
+                  </p>
+                )}
               </div>
 
               {/* Level radio cards */}
@@ -108,7 +119,7 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
                 {([1, 2, 3, 4] as const).map((lvl) => {
                   const levelData   = row.levels.find((l) => l.level === lvl)
                   const label       = levelData?.label ?? PROFICIENCY_LABELS[lvl]
-                  const description = levelData?.description ?? null
+                  const description = lang === 'en' ? (levelData?.description_en ?? levelData?.description) : (levelData?.description_vi ?? levelData?.description)
                   const checked     = currentScore === lvl
                   const isSelfScore = row.self_score === lvl
 
@@ -176,10 +187,8 @@ export default function ReviewForm({ assessmentId, rows, isReviewed }: Props) {
         </>
       )}
 
-      {/* Gap table + radar chart — shown after review is submitted */}
-      {isReviewed && (
-        <ReviewGapAnalysis rows={rows} scores={scores} />
-      )}
+      {/* Gap Analysis — shown alongside review form (calibration reference before submit, final results after) */}
+      <ReviewGapAnalysis rows={rows} scores={scores} />
     </div>
   )
 }

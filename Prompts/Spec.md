@@ -130,10 +130,11 @@ Gap visible to: Employee (own), Manager (own + direct reports), HR (everyone).
 #### Employee `/employee`
 - Header: name, function, job level
 - Assessment form: list of skills for their function
-- Each skill: name, definition, 4 radio options with level descriptions
+- Each skill: name, definition, 4 radio options, each option a row with level descriptions
 - Auto-save on change (draft)
 - Submit button → locks form, shows confirmation
-- After submit: results page with gap table + simple bar/radar chart
+- After submit: results page with message wait for line manager reivew.  
+- After line manager submit final, display gap table + simple bar/radar chart
 
 #### Manager `/manager`
 - **Tab 1 — My Assessment:** same as Employee flow
@@ -141,10 +142,11 @@ Gap visible to: Employee (own), Manager (own + direct reports), HR (everyone).
   - Columns: Name, Job Level, Self-assessment status, Manager review status
   - Click row → Employee detail view
 - **Employee detail view:**
-  - Table: Skill | Self Score | Manager Score (editable, pre-filled = self score) | Standard | Gap
-  - Gap column color-coded
-  - Save draft / Submit review button
-  - After manager submit → locked, gap finalized
+  - Each skill: name, definition, 4 radio options, with level descriptions. 
+  - Table: Self Score | Manager Score (editable, pre-filled = self score)
+  - Save draft, if score different notify manager to discuss with employee before submit.  
+  - Submit review button
+  - After manager submit → locked, gap finalized, display gap table + simple bar/radar chart
 
 #### HR Admin `/hr`
 - **Dashboard tab:**
@@ -156,11 +158,10 @@ Gap visible to: Employee (own), Manager (own + direct reports), HR (everyone).
   - Open / Close button
 - **Users tab:**
   - Table of all users with filter by function/role
-  - Import CSV button (columns: name, email, role, function, job_level, manager_email)
   - Inline edit: change manager assignment
 - **Skills tab:**
   - List skills by function
-  - Add/edit/delete skill
+  - Click on skill show 4 different proficiency level being hide
   - Set required level per job level (skill standards matrix)
 - **Export button:** Download full report as Excel
   - Columns: Employee, Function, Job Level, Skill, Self Score, Manager Score, Final Score, Standard, Gap

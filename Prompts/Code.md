@@ -17,3 +17,15 @@ for (const email of emails) {
   });
   console.log(email, error ? 'FAILED: ' + error.message : 'OK ✓');
 }
+
+openclaw auth add deepseek --key sk-c60194901149463ca7eec6cdee3a5bd4 --endpoint https://api.deepseek.com
+export OPENAI_API_KEY="sk-c60194901149463ca7eec6cdee3a5bd4" &&
+export OPENAI_BASE_URL="https://api.deepseek.com"
+
+OPENAI_API_KEY="sk-c60194901149463ca7eec6cdee3a5bd4" OPENAI_BASE_URL="https://api.deepseek.com" openclaw dashboard
+
+echo 'export DEEPSEEK_API_KEY="sk-c60194901149463ca7eec6cdee3a5bd4"' >> ~/.zshrc
+source ~/.zshrc
+
+OPENROUTER Key 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
+

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { createSkill, updateSkill, deleteSkill, upsertStandard } from '@/app/actions/hr'
+import { createSkill, updateSkill, deleteSkill, upsertStandard, upsertSkillLevel } from '@/app/actions/hr'
 import { PROFICIENCY_LABELS } from '@/lib/utils'
 import type { FunctionType, ProficiencyLevel } from '@/lib/types'
 
@@ -35,8 +35,10 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
   const [standards,  setStandards]  = useState(initialStandards)
   const [view,       setView]       = useState<View>('skills')
   const [editingId,  setEditingId]  = useState<string | null>(null)
-  const [editDraft,  setEditDraft]  = useState({ name: '', definition: '' })
+  const [editDraft,  setEditDraft]  = useState({ definition: '' })
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [editingLevel, setEditingLevel] = useState<{ skillId: string; level: number } | null>(null)
+  const [levelDraft,   setLevelDraft]   = useState('')
   const [error,      setError]      = useState<string | null>(null)
   const [isPending,  startTransition] = useTransition()
 
@@ -67,19 +69,21 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
 
   function startEdit(skill: Skill) {
     setEditingId(skill.id)
-    setEditDraft({ name: skill.name, definition: skill.definition ?? '' })
+    setEditDraft({ definition: skill.definition ?? '' })
   }
 
   function handleUpdate(id: string) {
     setError(null)
     startTransition(async () => {
+      const skill = skills.find((s) => s.id === id)
+      if (!skill) return
       const res = await updateSkill(id, {
-        name:       editDraft.name,
+        name:       skill.name,           // name is not editable in v1.2
         definition: editDraft.definition || null,
       })
       if (res.error) { setError(res.error); return }
       setSkills((prev) =>
-        prev.map((s) => s.id === id ? { ...s, name: editDraft.name, definition: editDraft.definition || null } : s)
+        prev.map((s) => s.id === id ? { ...s, definition: editDraft.definition || null } : s)
       )
       setEditingId(null)
     })
@@ -116,6 +120,29 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
 
   function toggleExpand(skillId: string) {
     setExpandedId((prev) => (prev === skillId ? null : skillId))
+    setEditingLevel(null)
+  }
+
+  function startEditLevel(skillId: string, level: number, currentDescription: string | null) {
+    setEditingLevel({ skillId, level })
+    setLevelDraft(currentDescription ?? '')
+  }
+
+  function handleSaveLevel(skillId: string, level: ProficiencyLevel) {
+    setError(null)
+    startTransition(async () => {
+      const res = await upsertSkillLevel(skillId, level, { description: levelDraft || null })
+      if (res.error) { setError(res.error); return }
+      setSkills((prev) => prev.map((s) => {
+        if (s.id !== skillId) return s
+        const existingLevel = s.levels.find((l) => l.level === level)
+        const newLevels = existingLevel
+          ? s.levels.map((l) => l.level === level ? { ...l, description: levelDraft || null } : l)
+          : [...s.levels, { level, label: null, description: levelDraft || null }]
+        return { ...s, levels: newLevels }
+      }))
+      setEditingLevel(null)
+    })
   }
 
   return (
@@ -201,19 +228,15 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
                           <tr key={skill.id}>
                             {editingId === skill.id ? (
                               <>
-                                <td className="px-6 py-2.5">
-                                  <input
-                                    type="text"
-                                    value={editDraft.name}
-                                    onChange={(e) => setEditDraft((p) => ({ ...p, name: e.target.value }))}
-                                    className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-[#0057D9] focus:outline-none"
-                                  />
+                                {/* Name is read-only in edit mode (v1.2: only definition is editable) */}
+                                <td className="px-6 py-2.5 font-medium text-gray-900 w-1/3">
+                                  {skill.name}
                                 </td>
                                 <td className="px-6 py-2.5">
                                   <input
                                     type="text"
                                     value={editDraft.definition}
-                                    onChange={(e) => setEditDraft((p) => ({ ...p, definition: e.target.value }))}
+                                    onChange={(e) => setEditDraft({ definition: e.target.value })}
                                     placeholder="Definition"
                                     className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-[#0057D9] focus:outline-none"
                                   />
@@ -269,37 +292,73 @@ export default function SkillsManager({ initialSkills, initialStandards, jobLeve
                             )}
                           </tr>
 
-                          {/* Expanded: proficiency level descriptions */}
+                          {/* Expanded: proficiency level descriptions with inline editing */}
                           {expandedId === skill.id && editingId !== skill.id && (
                             <tr key={`${skill.id}-levels`}>
                               <td colSpan={3} className="bg-gray-50 px-6 py-4">
-                                {skill.levels.length === 0 ? (
-                                  <p className="text-xs text-gray-400 italic">
-                                    No level descriptions defined for this skill.
-                                  </p>
-                                ) : (
-                                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                    {([1, 2, 3, 4] as const).map((lvl) => {
-                                      const ld = skill.levels.find((l) => l.level === lvl)
-                                      return (
-                                        <div
-                                          key={lvl}
-                                          className="rounded-lg border border-gray-200 bg-white p-3"
-                                        >
-                                          <p className="text-xs font-bold text-[#0057D9] mb-0.5">{lvl}</p>
-                                          <p className="text-xs font-medium text-gray-800 leading-tight">
-                                            {ld?.label ?? PROFICIENCY_LABELS[lvl]}
-                                          </p>
-                                          {ld?.description && (
+                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                  {([1, 2, 3, 4] as const).map((lvl: ProficiencyLevel) => {
+                                    const ld = skill.levels.find((l) => l.level === lvl)
+                                    const isEditingThis =
+                                      editingLevel?.skillId === skill.id && editingLevel.level === lvl
+
+                                    return (
+                                      <div
+                                        key={lvl}
+                                        className="rounded-lg border border-gray-200 bg-white p-3"
+                                      >
+                                        <div className="flex items-center justify-between mb-1">
+                                          <p className="text-xs font-bold text-[#0057D9]">{lvl}</p>
+                                          {!isEditingThis && (
+                                            <button
+                                              onClick={() => startEditLevel(skill.id, lvl, ld?.description ?? null)}
+                                              className="text-[10px] text-gray-400 hover:text-[#0057D9]"
+                                            >
+                                              Edit
+                                            </button>
+                                          )}
+                                        </div>
+                                        <p className="text-xs font-medium text-gray-800 leading-tight mb-1">
+                                          {ld?.label ?? PROFICIENCY_LABELS[lvl]}
+                                        </p>
+                                        {isEditingThis ? (
+                                          <div className="space-y-1">
+                                            <textarea
+                                              rows={3}
+                                              value={levelDraft}
+                                              onChange={(e) => setLevelDraft(e.target.value)}
+                                              className="w-full resize-none rounded border border-gray-300 px-2 py-1 text-xs focus:border-[#0057D9] focus:outline-none"
+                                              placeholder="Description…"
+                                            />
+                                            <div className="flex gap-1">
+                                              <button
+                                                onClick={() => handleSaveLevel(skill.id, lvl)}
+                                                disabled={isPending}
+                                                className="text-[10px] font-medium text-[#0057D9] hover:text-[#003087] disabled:opacity-50"
+                                              >
+                                                Save
+                                              </button>
+                                              <button
+                                                onClick={() => setEditingLevel(null)}
+                                                className="text-[10px] text-gray-500 hover:text-gray-700"
+                                              >
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          ld?.description ? (
                                             <p className="mt-1 text-xs text-gray-500 leading-tight">
                                               {ld.description}
                                             </p>
-                                          )}
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                )}
+                                          ) : (
+                                            <p className="mt-1 text-[10px] text-gray-300 italic">No description</p>
+                                          )
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
                               </td>
                             </tr>
                           )}

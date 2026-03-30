@@ -62,9 +62,10 @@ export default function ReviewGapAnalysis({ rows, scores }: Props) {
   const hasRequiredLevels = rows.some((r) => r.required_level != null)
   const radarData = analysisRows.map((r) => ({
     skill:      r.skill_name.length > 14 ? r.skill_name.slice(0, 13) + '…' : r.skill_name,
-    'Actual':   r.finalScore    ?? 0,
-    'Standard': r.required_level ?? 0,
+    'Actual':   r.actualScore   ?? 0,
+    'Standard': r.standardScore ?? 0,
   }))
+  const radarMax = Math.max(...radarData.flatMap((d) => [d['Actual'], d['Standard']]), 4)
 
   return (
     <div className="mt-8 space-y-6 border-t border-gray-200 pt-6">
@@ -157,7 +158,7 @@ export default function ReviewGapAnalysis({ rows, scores }: Props) {
               <PolarGrid stroke="#E5E7EB" />
               <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: '#374151' }} />
               <PolarRadiusAxis
-                domain={[0, 4]}
+                domain={[0, radarMax]}
                 tickCount={5}
                 tick={{ fontSize: 9, fill: '#9CA3AF' }}
                 axisLine={false}

@@ -6,8 +6,8 @@ export default async function UsersTab() {
   const supabase = await createServerSupabaseClient()
 
   const [usersRes, assRes] = await Promise.all([
-    supabase.from('users').select('id, name, email, role, function, job_level, dept, manager_id').order('name'),
-    supabase.from('assessments').select('employee_id, self_status, manager_status'),
+    supabase.from('users').select('id, name, email, role, function, job_level, dept, manager_id, username').order('name'),
+    supabase.from('assessments').select('id, employee_id, self_status, manager_status'),
   ])
 
   const users   = usersRes.data ?? []
@@ -25,11 +25,13 @@ export default async function UsersTab() {
       id:             u.id,
       name:           u.name,
       email:          u.email,
+      username:       u.username ?? null,
       role:           u.role,
       function:       u.function ?? null,
       job_level:      u.job_level ?? null,
       dept:           u.dept ?? null,
       manager_id:     u.manager_id ?? null,
+      assessment_id:  asmt?.id ?? null,
       self_status:    asmt?.self_status    ?? null,
       manager_status: asmt?.manager_status ?? null,
     }

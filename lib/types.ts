@@ -72,6 +72,7 @@ export type AssessmentScore = {
   self_score:    ProficiencyLevel | null
   manager_score: ProficiencyLevel | null
   final_score:   ProficiencyLevel | null  // generated: coalesce(manager_score, self_score)
+  evidence:      string | null            // optional evidence text; mandatory if self_score > required_level
 }
 
 // ─── Derived / joined types ───────────────────────────────────────────────────
@@ -154,6 +155,7 @@ export interface Database {
           skill_id:      string
           self_score?:    ProficiencyLevel | null
           manager_score?: ProficiencyLevel | null
+          evidence?:      string | null
         }
         Update:        Partial<Omit<AssessmentScore, 'final_score'>>
         Relationships: []

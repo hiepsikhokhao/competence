@@ -253,6 +253,7 @@ create table public.assessment_scores (
   self_score    int check (self_score    between 1 and 4),
   manager_score int check (manager_score between 1 and 4),
   final_score   int generated always as (coalesce(manager_score, self_score)) stored,
+  evidence      text,
   primary key (assessment_id, skill_id)
 );
 

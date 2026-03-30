@@ -3,7 +3,6 @@ import { createServerSupabaseClient } from '@/lib/supabase'
 import { logout } from '@/app/actions/auth'
 import TabBar from '@/components/manager/TabBar'
 import DashboardTab from '@/components/hr/DashboardTab'
-import CycleTab from '@/components/hr/CycleTab'
 import UsersTab from '@/components/hr/UsersTab'
 import SkillsTab from '@/components/hr/SkillsTab'
 import ExportTab from '@/components/hr/ExportTab'
@@ -13,7 +12,6 @@ export const metadata = { title: 'HR Admin — Competency Tool' }
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', href: '/hr?tab=dashboard' },
-  { id: 'cycle',     label: 'Cycle',     href: '/hr?tab=cycle'     },
   { id: 'users',     label: 'Users',     href: '/hr?tab=users'     },
   { id: 'skills',    label: 'Skills',    href: '/hr?tab=skills'    },
   { id: 'export',    label: 'Export',    href: '/hr?tab=export'    },
@@ -64,7 +62,6 @@ export default async function HrPage({
         <TabBar tabs={TABS} currentTab={tab} />
 
         {tab === 'dashboard' && <DashboardTab drillFn={drillFn} />}
-        {tab === 'cycle'     && <CycleTab />}
         {tab === 'users'     && <UsersTab />}
         {tab === 'skills'    && <SkillsTab />}
         {tab === 'export'    && <ExportTab />}
