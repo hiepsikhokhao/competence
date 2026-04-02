@@ -1,59 +1,56 @@
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { auth } from '@/lib/auth'
+import { prisma } from '@/lib/prisma'
 import * as XLSX from 'xlsx'
 
 export async function GET() {
-  const supabase = await createServerSupabaseClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return new Response('Unauthorized', { status: 401 })
-
-  const { data: profile } = await supabase
-    .from('users')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
-  if (profile?.role !== 'hr') return new Response('Forbidden', { status: 403 })
+  const session = await auth()
+  if (!session?.user?.id) return new Response('Unauthorized', { status: 401 })
+  if ((session.user as any).role !== 'hr') return new Response('Forbidden', { status: 403 })
 
   // ── Fetch all data ──────────────────────────────────────────────────────────
-  const [usersRes, assRes, scoresRes, skillsRes, stdRes] = await Promise.all([
-    supabase.from('users').select('id, name, email, role, function, job_level, dept').order('name'),
-    supabase.from('assessments').select('id, employee_id, self_status, manager_status, self_submitted_at, manager_reviewed_at'),
-    supabase.from('assessment_scores').select('assessment_id, skill_id, self_score, manager_score, final_score, evidence'),
-    supabase.from('skills').select('id, name, function, importance'),
-    supabase.from('skill_standards').select('skill_id, job_level, required_level'),
+  const [users, asmts, scoresRaw, skillsRaw, standards] = await Promise.all([
+    prisma.user.findMany({
+      select: { id: true, name: true, email: true, role: true, function: true, jobLevel: true, dept: true },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.assessment.findMany({
+      select: { id: true, employeeId: true, selfStatus: true, managerStatus: true, selfSubmittedAt: true, managerReviewedAt: true },
+    }),
+    prisma.assessmentScore.findMany({
+      select: { assessmentId: true, skillId: true, selfScore: true, managerScore: true, finalScore: true, evidence: true },
+    }),
+    prisma.skill.findMany({
+      select: { id: true, name: true, function: true, importance: true },
+    }),
+    prisma.skillStandard.findMany({
+      select: { skillId: true, jobLevel: true, requiredLevel: true },
+    }),
   ])
 
-  const users      = usersRes.data   ?? []
-  const asmts      = assRes.data     ?? []
-  const scores     = (scoresRes.data  ?? []) as { assessment_id: string; skill_id: string; self_score: number | null; manager_score: number | null; final_score: number | null; evidence: string | null }[]
-  const skills     = (skillsRes.data ?? []) as { id: string; name: string; function: string; importance: number | null }[]
-  const standards  = stdRes.data     ?? []
+  const scores = scoresRaw as { assessmentId: string; skillId: string; selfScore: number | null; managerScore: number | null; finalScore: number | null; evidence: string | null }[]
+  const skills = skillsRaw as { id: string; name: string; function: string; importance: number | null }[]
 
-  const userMap   = Object.fromEntries(users.map((u) => [u.id, u]))
-  const assmtByEmployee = Object.fromEntries(asmts.map((a) => [a.employee_id, a]))
-  const assmtById = Object.fromEntries(asmts.map((a) => [a.id, a]))
+  const assmtByEmployee = Object.fromEntries(asmts.map((a) => [a.employeeId, a]))
   const skillMap  = Object.fromEntries(skills.map((s) => [s.id, s]))
-  const stdMap    = Object.fromEntries(standards.map((s) => [`${s.skill_id}:${s.job_level}`, s.required_level]))
+  const stdMap    = Object.fromEntries(standards.map((s) => [`${s.skillId}:${s.jobLevel}`, s.requiredLevel]))
 
-  // ── Sheet 1: Summary — ALL employees regardless of status ──────────────────
+  // ── Sheet 1: Summary ──────────────────────────────────────────────────────
   const summaryRows = users.filter((u) => u.role === 'employee').map((u) => {
     const asmt = assmtByEmployee[u.id]
     return {
       Name:             u.name,
       Email:            u.email,
       Function:         u.function        ?? '',
-      'Job Level':      u.job_level       ?? '',
+      'Job Level':      u.jobLevel        ?? '',
       Department:       u.dept            ?? '',
-      'Self Status':    asmt?.self_status    ?? 'not_started',
-      'Manager Status': asmt?.manager_status ?? '',
-      'Submitted At':   asmt?.self_submitted_at   ?? '',
-      'Reviewed At':    asmt?.manager_reviewed_at ?? '',
+      'Self Status':    asmt?.selfStatus    ?? 'not_started',
+      'Manager Status': asmt?.managerStatus ?? '',
+      'Submitted At':   asmt?.selfSubmittedAt?.toISOString()   ?? '',
+      'Reviewed At':    asmt?.managerReviewedAt?.toISOString() ?? '',
     }
   })
 
-  // ── Sheet 2: Detailed scores — ALL employees, ALL skills ──────────────────
-  // For employees with no scores, still include rows with empty score columns
+  // ── Sheet 2: Detailed scores ──────────────────────────────────────────────
   const detailRows: Record<string, unknown>[] = []
 
   for (const u of users.filter((u) => u.role === 'employee')) {
@@ -61,15 +58,14 @@ export async function GET() {
     const fnSkills = skills.filter((s) => s.function === u.function)
 
     if (fnSkills.length === 0) {
-      // No skills for this function — add a placeholder row
       detailRows.push({
         Name:             u.name,
         Email:            u.email,
         Function:         u.function  ?? '',
-        'Job Level':      u.job_level ?? '',
+        'Job Level':      u.jobLevel  ?? '',
         Department:       u.dept      ?? '',
-        'Self Status':    asmt?.self_status    ?? 'not_started',
-        'Manager Status': asmt?.manager_status ?? '',
+        'Self Status':    asmt?.selfStatus    ?? 'not_started',
+        'Manager Status': asmt?.managerStatus ?? '',
         Skill:            '',
         'Self Score':     '',
         'Manager Score':  '',
@@ -86,14 +82,14 @@ export async function GET() {
 
     for (const skill of fnSkills) {
       const sc = asmt
-        ? scores.find((r) => r.assessment_id === asmt.id && r.skill_id === skill.id)
+        ? scores.find((r) => r.assessmentId === asmt.id && r.skillId === skill.id)
         : null
-      const stdKey    = u.job_level ? `${skill.id}:${u.job_level}` : null
+      const stdKey    = u.jobLevel ? `${skill.id}:${u.jobLevel}` : null
       const req       = stdKey ? (stdMap[stdKey] ?? null) : null
       const imp       = skill.importance ?? null
-      const selfScore = sc?.self_score    ?? null
-      const mgScore   = sc?.manager_score ?? null
-      const final     = sc?.final_score   ?? null
+      const selfScore = sc?.selfScore    ?? null
+      const mgScore   = sc?.managerScore ?? null
+      const final     = sc?.finalScore   ?? null
       const stdScore  = req != null && imp != null ? req * imp : null
       const actScore  = final != null && imp != null ? final * imp : null
       const gap       = actScore != null && stdScore != null ? actScore - stdScore : null
@@ -102,10 +98,10 @@ export async function GET() {
         Name:             u.name,
         Email:            u.email,
         Function:         u.function  ?? '',
-        'Job Level':      u.job_level ?? '',
+        'Job Level':      u.jobLevel  ?? '',
         Department:       u.dept      ?? '',
-        'Self Status':    asmt?.self_status    ?? 'not_started',
-        'Manager Status': asmt?.manager_status ?? '',
+        'Self Status':    asmt?.selfStatus    ?? 'not_started',
+        'Manager Status': asmt?.managerStatus ?? '',
         Skill:            skill.name,
         'Self Score':     selfScore ?? '',
         'Manager Score':  mgScore   ?? '',

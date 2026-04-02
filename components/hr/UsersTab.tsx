@@ -1,18 +1,17 @@
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { prisma } from '@/lib/prisma'
 import CsvImport from './CsvImport'
 import UsersTableClient from './UsersTableClient'
 
 export default async function UsersTab() {
-  const supabase = await createServerSupabaseClient()
-
-  const [usersRes, assRes] = await Promise.all([
-    supabase.from('users').select('id, name, email, role, function, job_level, dept, manager_id, username').order('name'),
-    supabase.from('assessments').select('id, employee_id, self_status, manager_status'),
+  const [users, assessments] = await Promise.all([
+    prisma.user.findMany({ orderBy: { name: 'asc' } }),
+    prisma.assessment.findMany({
+      select: { id: true, employeeId: true, selfStatus: true, managerStatus: true },
+    }),
   ])
 
-  const users   = usersRes.data ?? []
   const asmtMap = Object.fromEntries(
-    (assRes.data ?? []).map((a) => [a.employee_id, a])
+    assessments.map((a) => [a.employeeId, a]),
   )
 
   const managers = users
@@ -28,12 +27,12 @@ export default async function UsersTab() {
       username:       u.username ?? null,
       role:           u.role,
       function:       u.function ?? null,
-      job_level:      u.job_level ?? null,
+      job_level:      u.jobLevel ?? null,
       dept:           u.dept ?? null,
-      manager_id:     u.manager_id ?? null,
+      manager_id:     u.managerId ?? null,
       assessment_id:  asmt?.id ?? null,
-      self_status:    asmt?.self_status    ?? null,
-      manager_status: asmt?.manager_status ?? null,
+      self_status:    asmt?.selfStatus    ?? null,
+      manager_status: asmt?.managerStatus ?? null,
     }
   })
 

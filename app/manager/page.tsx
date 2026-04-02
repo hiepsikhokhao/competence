@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/auth-helpers'
+import { prisma } from '@/lib/prisma'
 import { logout } from '@/app/actions/auth'
 import AssessmentTabContent from '@/components/assessment/AssessmentTabContent'
 import LanguageToggle from '@/components/LanguageToggle'
@@ -18,16 +19,12 @@ export default async function ManagerPage({
 }: {
   searchParams: Promise<{ tab?: string; employee?: string }>
 }) {
-  const supabase = await createServerSupabaseClient()
+  const authUser = await requireAuth()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: profile } = await supabase
-    .from('users')
-    .select('name, role, function, job_level')
-    .eq('id', user.id)
-    .single()
+  const profile = await prisma.user.findUnique({
+    where: { id: authUser.id },
+    select: { name: true, role: true, function: true, jobLevel: true },
+  })
 
   if (profile?.role !== 'manager') redirect('/login')
 
@@ -36,35 +33,43 @@ export default async function ManagerPage({
   const employeeId = params.employee ?? null
 
   const userFunction = profile.function as FunctionType | null
-  const userJobLevel = profile.job_level
+  const userJobLevel = profile.jobLevel
 
   // ── My Team tab data ─────────────────────────────────────────────────────────
   let teamMembers: TeamMember[] = []
 
   if (tab === 'team') {
-    const { data: membersData } = await supabase
-      .from('users')
-      .select('id, name, email, username, role, dept, function, job_level, manager_id, created_at')
-      .eq('manager_id', user.id)
-      .order('name')
-
-    const members = membersData ?? []
+    const members = await prisma.user.findMany({
+      where: { managerId: authUser.id },
+      orderBy: { name: 'asc' },
+    })
 
     if (members.length > 0) {
       const memberIds = members.map((m) => m.id)
 
-      const { data: assessmentsData } = await supabase
-        .from('assessments')
-        .select('employee_id, self_status, manager_status')
-        .in('employee_id', memberIds)
+      const assessments = await prisma.assessment.findMany({
+        where: { employeeId: { in: memberIds } },
+        select: { employeeId: true, selfStatus: true, managerStatus: true },
+      })
 
       const assessmentMap = Object.fromEntries(
-        (assessmentsData ?? []).map((a) => [a.employee_id, a])
+        assessments.map((a) => [a.employeeId, a]),
       )
 
       teamMembers = members.map((m) => ({
-        ...m,
-        assessment: assessmentMap[m.id] ?? null,
+        id:         m.id,
+        name:       m.name,
+        email:      m.email,
+        username:   m.username,
+        role:       m.role,
+        dept:       m.dept,
+        function:   m.function,
+        job_level:  m.jobLevel,
+        manager_id: m.managerId,
+        created_at: m.createdAt.toISOString(),
+        assessment: assessmentMap[m.id]
+          ? { self_status: assessmentMap[m.id].selfStatus, manager_status: assessmentMap[m.id].managerStatus }
+          : null,
       }))
     }
   }
@@ -79,11 +84,10 @@ export default async function ManagerPage({
       redirect('/manager?tab=team')
     }
 
-    const { data: assessment } = await supabase
-      .from('assessments')
-      .select('id, manager_status')
-      .eq('employee_id', employeeId)
-      .single()
+    const assessment = await prisma.assessment.findFirst({
+      where: { employeeId },
+      select: { id: true, managerStatus: true },
+    })
 
     if (!assessment) redirect('/manager?tab=team')
 
@@ -91,56 +95,58 @@ export default async function ManagerPage({
     let reviewRows: ReviewRow[] = []
 
     if (employeeFunction) {
-      const { data: skillsData } = await supabase
-        .from('skills')
-        .select('id, name, definition, definition_en, definition_vi, importance')
-        .eq('function', employeeFunction)
-        .order('name')
-
-      const skills = (skillsData as any[]) ?? []
+      const skills = await prisma.skill.findMany({
+        where: { function: employeeFunction },
+        orderBy: { name: 'asc' },
+      })
 
       if (skills.length > 0) {
-        const skillIds = skills.map((s: any) => s.id)
+        const skillIds = skills.map((s) => s.id)
 
-        const [scoresResult, standardsResult, levelsResult] = await Promise.all([
-          supabase
-            .from('assessment_scores')
-            .select('skill_id, self_score, manager_score, evidence')
-            .eq('assessment_id', assessment.id),
+        const [scoresData, standardsData, levelsData] = await Promise.all([
+          prisma.assessmentScore.findMany({
+            where: { assessmentId: assessment.id },
+            select: { skillId: true, selfScore: true, managerScore: true, evidence: true },
+          }),
           member.job_level
-            ? supabase
-                .from('skill_standards')
-                .select('skill_id, required_level')
-                .in('skill_id', skillIds)
-                .eq('job_level', member.job_level)
-            : Promise.resolve({ data: [] as { skill_id: string; required_level: number }[] | null }),
-          supabase
-            .from('skill_levels')
-            .select('skill_id, level, label, description, description_en, description_vi')
-            .in('skill_id', skillIds)
-            .order('level'),
+            ? prisma.skillStandard.findMany({
+                where: { skillId: { in: skillIds }, jobLevel: member.job_level },
+                select: { skillId: true, requiredLevel: true },
+              })
+            : Promise.resolve([]),
+          prisma.skillLevel.findMany({
+            where: { skillId: { in: skillIds } },
+            orderBy: { level: 'asc' },
+            select: { skillId: true, level: true, label: true, description: true, descriptionEn: true, descriptionVi: true },
+          }),
         ])
 
-        const scoresMap    = Object.fromEntries((scoresResult.data ?? []).map((s) => [s.skill_id, s]))
+        const scoresMap    = Object.fromEntries(scoresData.map((s) => [s.skillId, s]))
         const standardsMap = Object.fromEntries(
-          (standardsResult.data ?? []).map((s) => [s.skill_id, s.required_level as ProficiencyLevel])
+          standardsData.map((s) => [s.skillId, s.requiredLevel as ProficiencyLevel]),
         )
 
         const levelsMap: Record<string, { level: number; label: string | null; description: string | null; description_en: string | null; description_vi: string | null }[]> = {}
-        for (const l of (levelsResult.data as any) ?? []) {
-          levelsMap[l.skill_id] ??= []
-          levelsMap[l.skill_id].push(l)
+        for (const l of levelsData) {
+          levelsMap[l.skillId] ??= []
+          levelsMap[l.skillId].push({
+            level: l.level,
+            label: l.label,
+            description: l.description,
+            description_en: l.descriptionEn,
+            description_vi: l.descriptionVi,
+          })
         }
 
-        reviewRows = skills.map((s: any) => ({
+        reviewRows = skills.map((s) => ({
           skill_id:       s.id,
           skill_name:     s.name,
           definition:     s.definition,
-          definition_en:  (s as any).definition_en ?? null,
-          definition_vi:  (s as any).definition_vi ?? null,
+          definition_en:  s.definitionEn ?? null,
+          definition_vi:  s.definitionVi ?? null,
           levels:         levelsMap[s.id] ?? [],
-          self_score:     (scoresMap[s.id]?.self_score    ?? null) as ProficiencyLevel | null,
-          manager_score:  (scoresMap[s.id]?.manager_score ?? null) as ProficiencyLevel | null,
+          self_score:     (scoresMap[s.id]?.selfScore    ?? null) as ProficiencyLevel | null,
+          manager_score:  (scoresMap[s.id]?.managerScore ?? null) as ProficiencyLevel | null,
           evidence:       (scoresMap[s.id]?.evidence      ?? null) as string | null,
           required_level: standardsMap[s.id] ?? null,
           importance:     s.importance ?? null,
@@ -163,7 +169,7 @@ export default async function ManagerPage({
               {employeeFunction ?? '—'} · Level {member.job_level ?? '—'}
             </p>
           </div>
-          {assessment.manager_status === 'reviewed' && (
+          {assessment.managerStatus === 'reviewed' && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
               <span className="size-1.5 rounded-full bg-green-500" />
               Review submitted
@@ -173,7 +179,7 @@ export default async function ManagerPage({
         <ReviewForm
           assessmentId={assessment.id}
           rows={reviewRows}
-          isReviewed={assessment.manager_status === 'reviewed'}
+          isReviewed={assessment.managerStatus === 'reviewed'}
         />
       </div>
     )
@@ -225,7 +231,7 @@ export default async function ManagerPage({
         {/* My Assessment tab */}
         {tab === 'assessment' && (
           <AssessmentTabContent
-            userId={user.id}
+            userId={authUser.id}
             userFunction={userFunction}
             userJobLevel={userJobLevel}
             baseUrl="/manager"
@@ -237,7 +243,7 @@ export default async function ManagerPage({
         {/* My Result tab */}
         {tab === 'result' && (
           <AssessmentTabContent
-            userId={user.id}
+            userId={authUser.id}
             userFunction={userFunction}
             userJobLevel={userJobLevel}
             baseUrl="/manager"

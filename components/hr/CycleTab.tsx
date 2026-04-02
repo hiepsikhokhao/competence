@@ -1,14 +1,13 @@
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { prisma } from '@/lib/prisma'
 import CycleControls from './CycleControls'
 
 export default async function CycleTab() {
-  const supabase = await createServerSupabaseClient()
-  const { data: cycles } = await supabase
-    .from('cycle')
-    .select('id, name, status, opened_at, closed_at')
-  const cycle = cycles?.[0] ?? null
+  const cycles = await prisma.cycle.findMany({
+    select: { id: true, name: true, status: true, openedAt: true, closedAt: true },
+  })
+  const cycle = cycles[0] ?? null
 
-  const fmt = (ts: string | null) =>
+  const fmt = (ts: Date | null) =>
     ts ? new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null
 
   return (
@@ -20,8 +19,8 @@ export default async function CycleTab() {
               <div>
                 <p className="text-base font-semibold text-gray-900">{cycle.name}</p>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  {fmt(cycle.opened_at) ? `Opened ${fmt(cycle.opened_at)}` : 'Not yet opened'}
-                  {fmt(cycle.closed_at) && ` · Closed ${fmt(cycle.closed_at)}`}
+                  {fmt(cycle.openedAt) ? `Opened ${fmt(cycle.openedAt)}` : 'Not yet opened'}
+                  {fmt(cycle.closedAt) && ` · Closed ${fmt(cycle.closedAt)}`}
                 </p>
               </div>
               <StatusBadge status={cycle.status} />

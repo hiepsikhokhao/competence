@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+.claude
+*.md
+.DS_Store
+.env*
+npm-debug.log*

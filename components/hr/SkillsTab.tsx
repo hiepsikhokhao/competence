@@ -1,35 +1,32 @@
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { prisma } from '@/lib/prisma'
 import SkillsManager from './SkillsManager'
 import { JOB_LEVELS } from '@/lib/utils'
 import type { FunctionType } from '@/lib/types'
 
 export default async function SkillsTab() {
-  const supabase = await createServerSupabaseClient()
-
-  const [skillsRes, stdRes, levelsRes] = await Promise.all([
-    supabase.from('skills').select('id, name, definition, function').order('function').order('name'),
-    supabase.from('skill_standards').select('skill_id, job_level, required_level'),
-    supabase.from('skill_levels').select('skill_id, level, label, description').order('level'),
+  const [skillsRaw, stdRaw, levelsRaw] = await Promise.all([
+    prisma.skill.findMany({ orderBy: [{ function: 'asc' }, { name: 'asc' }] }),
+    prisma.skillStandard.findMany(),
+    prisma.skillLevel.findMany({ orderBy: { level: 'asc' } }),
   ])
 
-  const skillsRaw = (skillsRes.data ?? []) as {
+  const skillsData = skillsRaw as {
     id: string; name: string; definition: string | null; function: FunctionType
   }[]
 
   const standards: Record<string, Record<string, number>> = {}
-  for (const s of stdRes.data ?? []) {
-    standards[s.skill_id]              ??= {}
-    standards[s.skill_id][s.job_level]   = s.required_level
+  for (const s of stdRaw) {
+    standards[s.skillId]              ??= {}
+    standards[s.skillId][s.jobLevel]   = s.requiredLevel
   }
 
-  // Build levels map: skillId → sorted level rows
   const levelsMap: Record<string, { level: number; label: string | null; description: string | null }[]> = {}
-  for (const l of levelsRes.data ?? []) {
-    levelsMap[l.skill_id] ??= []
-    levelsMap[l.skill_id].push(l)
+  for (const l of levelsRaw) {
+    levelsMap[l.skillId] ??= []
+    levelsMap[l.skillId].push({ level: l.level, label: l.label, description: l.description })
   }
 
-  const skills = skillsRaw.map((s) => ({
+  const skills = skillsData.map((s) => ({
     ...s,
     levels: levelsMap[s.id] ?? [],
   }))

@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/auth-helpers'
+import { prisma } from '@/lib/prisma'
 import { logout } from '@/app/actions/auth'
 import TabBar from '@/components/manager/TabBar'
 import DashboardTab from '@/components/hr/DashboardTab'
@@ -22,16 +23,12 @@ export default async function HrPage({
 }: {
   searchParams: Promise<{ tab?: string; fn?: string }>
 }) {
-  const supabase = await createServerSupabaseClient()
+  const authUser = await requireAuth()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: profile } = await supabase
-    .from('users')
-    .select('name, role')
-    .eq('id', user.id)
-    .single()
+  const profile = await prisma.user.findUnique({
+    where: { id: authUser.id },
+    select: { name: true, role: true },
+  })
 
   if (profile?.role !== 'hr') redirect('/login')
 

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { prisma } from '@/lib/prisma'
 import AssessmentForm from './AssessmentForm'
 import GapTable from '@/components/gap/GapTable'
 import type { GapRow } from '@/components/gap/GapTable'
@@ -9,9 +9,9 @@ type Props = {
   userId:       string
   userFunction: FunctionType | null
   userJobLevel: string | null
-  baseUrl:      string                 // e.g. '/employee' or '/manager?tab=assessment&atab'
+  baseUrl:      string
   activeTab:    'assessment' | 'result'
-  showTabBar?:  boolean                // default true
+  showTabBar?:  boolean
 }
 
 export default async function AssessmentTabContent({
@@ -22,18 +22,12 @@ export default async function AssessmentTabContent({
   activeTab,
   showTabBar = true,
 }: Props) {
-  const supabase = await createServerSupabaseClient()
-
   // ── Active cycle ─────────────────────────────────────────────────────────────
-  const { data: cycles } = await supabase
-    .from('cycle')
-    .select('id, name')
-    .limit(1)
-
-  const cycle = cycles?.[0] ?? null
+  const cycles = await prisma.cycle.findMany({ select: { id: true, name: true }, take: 1 })
+  const cycle = cycles[0] ?? null
 
   // ── Skills for this user's function ──────────────────────────────────────────
-  let skills: { id: string; name: string; definition: string | null; definition_en: string | null; definition_vi: string | null; importance?: number | null }[] = []
+  let skills: { id: string; name: string; definition: string | null; definition_en: string | null; definition_vi: string | null; importance: number | null }[] = []
   let skillLevelsMap: Record<
     string,
     { level: number; label: string | null; description: string | null; description_en: string | null; description_vi: string | null }[]
@@ -41,66 +35,66 @@ export default async function AssessmentTabContent({
   let standardsMap: Record<string, ProficiencyLevel> = {}
 
   if (userFunction) {
-    const { data: skillsData } = await supabase
-      .from('skills')
-      .select('id, name, definition, definition_en, definition_vi, importance')
-      .eq('function', userFunction)
-      .order('name')
+    const skillsData = await prisma.skill.findMany({
+      where: { function: userFunction },
+      orderBy: { name: 'asc' },
+    })
 
-    skills = (skillsData as any) ?? []
+    skills = skillsData.map((s) => ({
+      id: s.id,
+      name: s.name,
+      definition: s.definition,
+      definition_en: s.definitionEn,
+      definition_vi: s.definitionVi,
+      importance: s.importance,
+    }))
 
     if (skills.length > 0) {
       const skillIds = skills.map((s) => s.id)
 
-      const { data: levelsData } = await supabase
-        .from('skill_levels')
-        .select('skill_id, level, label, description, description_en, description_vi')
-        .in('skill_id', skillIds)
-        .order('level')
+      const levelsData = await prisma.skillLevel.findMany({
+        where: { skillId: { in: skillIds } },
+        orderBy: { level: 'asc' },
+      })
 
-      for (const l of (levelsData as any) ?? []) {
-        skillLevelsMap[l.skill_id] ??= []
-        skillLevelsMap[l.skill_id].push(l)
+      for (const l of levelsData) {
+        skillLevelsMap[l.skillId] ??= []
+        skillLevelsMap[l.skillId].push({
+          level: l.level,
+          label: l.label,
+          description: l.description,
+          description_en: l.descriptionEn,
+          description_vi: l.descriptionVi,
+        })
       }
 
       if (userJobLevel) {
-        const { data: standardsData } = await supabase
-          .from('skill_standards')
-          .select('skill_id, required_level')
-          .in('skill_id', skillIds)
-          .eq('job_level', userJobLevel)
-
-        for (const s of standardsData ?? []) {
-          standardsMap[s.skill_id] = s.required_level as ProficiencyLevel
+        const standardsData = await prisma.skillStandard.findMany({
+          where: { skillId: { in: skillIds }, jobLevel: userJobLevel },
+        })
+        for (const s of standardsData) {
+          standardsMap[s.skillId] = s.requiredLevel as ProficiencyLevel
         }
       }
     }
   }
 
   // ── Assessment (get or create) ────────────────────────────────────────────────
-  // Filter by cycle_id so we always get the assessment for the current open cycle,
-  // not a stale one from a previous cycle (which would cause maybeSingle to fail
-  // with multiple rows and return null, leading to empty scores).
-  let { data: assessment } = cycle
-    ? await supabase
-        .from('assessments')
-        .select('id, self_status, manager_status')
-        .eq('employee_id', userId)
-        .eq('cycle_id', cycle.id)
-        .maybeSingle()
-    : await supabase
-        .from('assessments')
-        .select('id, self_status, manager_status')
-        .eq('employee_id', userId)
-        .maybeSingle()
+  let assessment = cycle
+    ? await prisma.assessment.findFirst({
+        where: { employeeId: userId, cycleId: cycle.id },
+        select: { id: true, selfStatus: true, managerStatus: true },
+      })
+    : await prisma.assessment.findFirst({
+        where: { employeeId: userId },
+        select: { id: true, selfStatus: true, managerStatus: true },
+      })
 
   if (!assessment && cycle) {
-    const { data: created } = await supabase
-      .from('assessments')
-      .insert({ cycle_id: cycle.id, employee_id: userId })
-      .select('id, self_status, manager_status')
-      .single()
-    assessment = created
+    assessment = await prisma.assessment.create({
+      data: { cycleId: cycle.id, employeeId: userId },
+      select: { id: true, selfStatus: true, managerStatus: true },
+    })
   }
 
   // ── Existing scores + evidence ────────────────────────────────────────────────
@@ -113,11 +107,17 @@ export default async function AssessmentTabContent({
   }[] = []
 
   if (assessment) {
-    const { data } = await supabase
-      .from('assessment_scores')
-      .select('skill_id, self_score, manager_score, final_score, evidence')
-      .eq('assessment_id', assessment.id)
-    scoresData = (data ?? []) as typeof scoresData
+    const raw = await prisma.assessmentScore.findMany({
+      where: { assessmentId: assessment.id },
+      select: { skillId: true, selfScore: true, managerScore: true, finalScore: true, evidence: true },
+    })
+    scoresData = raw.map((s) => ({
+      skill_id: s.skillId,
+      self_score: s.selfScore,
+      manager_score: s.managerScore,
+      final_score: s.finalScore,
+      evidence: s.evidence,
+    }))
   }
 
   const initialScores: Record<string, ProficiencyLevel> = {}
@@ -149,8 +149,8 @@ export default async function AssessmentTabContent({
     levels:        skillLevelsMap[s.id] ?? [],
   }))
 
-  const isSubmitted       = assessment?.self_status    === 'submitted'
-  const isManagerReviewed = assessment?.manager_status === 'reviewed'
+  const isSubmitted       = assessment?.selfStatus    === 'submitted'
+  const isManagerReviewed = assessment?.managerStatus === 'reviewed'
 
   // ── Guards ────────────────────────────────────────────────────────────────────
   if (!userFunction) {
@@ -181,7 +181,6 @@ export default async function AssessmentTabContent({
   }
 
   // ── Tab bar ───────────────────────────────────────────────────────────────────
-  // baseUrl examples: '/employee' → links become '/employee?tab=assessment'
   const tabBar = showTabBar ? (
     <div className="mb-6 flex gap-1 border-b border-gray-200">
       <TabLink
@@ -211,7 +210,7 @@ export default async function AssessmentTabContent({
             </h2>
             {cycle?.name && <p className="mt-0.5 text-xs text-gray-500">{cycle.name}</p>}
           </div>
-          <StatusPill status={assessment.self_status} />
+          <StatusPill status={assessment.selfStatus} />
         </div>
 
         {/* Instruction block — always visible */}
@@ -245,7 +244,6 @@ export default async function AssessmentTabContent({
       {tabBar}
 
       {!isSubmitted ? (
-        // Not yet submitted — prompt to submit first
         <div className="py-10 text-center">
           <p className="text-base font-semibold text-gray-900">Submit your assessment first</p>
           <p className="mt-1 text-sm text-gray-500">
@@ -254,7 +252,6 @@ export default async function AssessmentTabContent({
         </div>
       ) : (
         <>
-          {/* Title + status badge */}
           <div className="mb-4 flex items-center gap-3">
             <h2 className="text-base font-semibold text-gray-900">
               Game Publishing Functional Competency — My Result
@@ -272,7 +269,6 @@ export default async function AssessmentTabContent({
             )}
           </div>
 
-          {/* Pending notice banner */}
           {!isManagerReviewed && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               Awaiting line manager review. Results below are based on your self-assessment.
@@ -287,7 +283,6 @@ export default async function AssessmentTabContent({
 
           <GapTable rows={gapRows} managerReviewed={isManagerReviewed} />
 
-          {/* Disclaimer when pending */}
           {!isManagerReviewed && (
             <p className="mt-2 text-xs italic text-gray-400">
               * Scores may be adjusted after manager review

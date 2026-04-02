@@ -1,6 +1,6 @@
 import Link from 'next/link'
-import { createServerSupabaseClient } from '@/lib/supabase'
-import { JOB_LEVELS, PROFICIENCY_LABELS } from '@/lib/utils'
+import { prisma } from '@/lib/prisma'
+import { JOB_LEVELS } from '@/lib/utils'
 import type { FunctionType, ProficiencyLevel } from '@/lib/types'
 
 const FUNCTIONS: FunctionType[] = ['UA', 'MKT', 'LiveOps']
@@ -16,34 +16,40 @@ function heatCell(avg: number): string {
 type Props = { drillFn: FunctionType | null }
 
 export default async function DashboardTab({ drillFn }: Props) {
-  const supabase = await createServerSupabaseClient()
-
-  const [usersRes, assRes, scoresRes, skillsRes, stdRes] = await Promise.all([
-    supabase.from('users').select('id, name, function, job_level').eq('role', 'employee'),
-    supabase.from('assessments').select('id, employee_id, self_status, manager_status'),
-    supabase.from('assessment_scores').select('assessment_id, skill_id, final_score'),
-    supabase.from('skills').select('id, name, function, importance').order('name'),
-    supabase.from('skill_standards').select('skill_id, job_level, required_level'),
+  const [users, asmts, scores, skillsRaw, standards] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: 'employee' },
+      select: { id: true, name: true, function: true, jobLevel: true },
+    }),
+    prisma.assessment.findMany({
+      select: { id: true, employeeId: true, selfStatus: true, managerStatus: true },
+    }),
+    prisma.assessmentScore.findMany({
+      select: { assessmentId: true, skillId: true, finalScore: true },
+    }),
+    prisma.skill.findMany({
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, function: true, importance: true },
+    }),
+    prisma.skillStandard.findMany({
+      select: { skillId: true, jobLevel: true, requiredLevel: true },
+    }),
   ])
 
-  const users     = usersRes.data   ?? []
-  const asmts     = assRes.data     ?? []
-  const scores    = scoresRes.data  ?? []
-  const skills    = (skillsRes.data ?? []) as { id: string; name: string; function: string; importance: number | null }[]
-  const standards = stdRes.data     ?? []
+  const skills = skillsRaw as { id: string; name: string; function: FunctionType; importance: number | null }[]
 
-  const assmtByEmployee = Object.fromEntries(asmts.map((a) => [a.employee_id, a]))
+  const assmtByEmployee = Object.fromEntries(asmts.map((a) => [a.employeeId, a]))
   const assmtById       = Object.fromEntries(asmts.map((a) => [a.id, a]))
   const userById        = Object.fromEntries(users.map((u) => [u.id, u]))
   const stdMap          = Object.fromEntries(
-    standards.map((s) => [`${s.skill_id}:${s.job_level}`, s.required_level as ProficiencyLevel])
+    standards.map((s) => [`${s.skillId}:${s.jobLevel}`, s.requiredLevel as ProficiencyLevel]),
   )
 
   // ── Completion stats per function ─────────────────────────────────────────
   const completion = FUNCTIONS.map((fn) => {
     const fnUsers   = users.filter((u) => u.function === fn)
-    const submitted = fnUsers.filter((u) => assmtByEmployee[u.id]?.self_status    === 'submitted').length
-    const reviewed  = fnUsers.filter((u) => assmtByEmployee[u.id]?.manager_status === 'reviewed').length
+    const submitted = fnUsers.filter((u) => assmtByEmployee[u.id]?.selfStatus    === 'submitted').length
+    const reviewed  = fnUsers.filter((u) => assmtByEmployee[u.id]?.managerStatus === 'reviewed').length
     return { fn, total: fnUsers.length, submitted, reviewed }
   })
 
@@ -54,51 +60,49 @@ export default async function DashboardTab({ drillFn }: Props) {
   }
 
   for (const sc of scores) {
-    if (sc.final_score == null) continue
-    const asmt = assmtById[sc.assessment_id]
-    if (!asmt || asmt.self_status !== 'submitted') continue
-    const u = userById[asmt.employee_id]
-    if (!u?.function || !u?.job_level) continue
+    if (sc.finalScore == null) continue
+    const asmt = assmtById[sc.assessmentId]
+    if (!asmt || asmt.selfStatus !== 'submitted') continue
+    const u = userById[asmt.employeeId]
+    if (!u?.function || !u?.jobLevel) continue
 
     const fn    = u.function as FunctionType
-    const skill = skills.find((s) => s.id === sc.skill_id)
+    const skill = skills.find((s) => s.id === sc.skillId)
     if (!skill || skill.function !== fn) continue
 
-    const required = stdMap[`${sc.skill_id}:${u.job_level}`]
+    const required = stdMap[`${sc.skillId}:${u.jobLevel}`]
     if (required == null) continue
 
     const importance = skill.importance ?? null
-    // Weighted gap: (final_score × importance) - (required_level × importance)
     const gap = importance != null
-      ? (sc.final_score * importance) - (required * importance)
-      : sc.final_score - required
-    heatmap[fn][sc.skill_id]               ??= {}
-    heatmap[fn][sc.skill_id][u.job_level]  ??= { sum: 0, count: 0 }
-    heatmap[fn][sc.skill_id][u.job_level].sum   += gap
-    heatmap[fn][sc.skill_id][u.job_level].count += 1
+      ? (sc.finalScore * importance) - (required * importance)
+      : sc.finalScore - required
+    heatmap[fn][sc.skillId]              ??= {}
+    heatmap[fn][sc.skillId][u.jobLevel]  ??= { sum: 0, count: 0 }
+    heatmap[fn][sc.skillId][u.jobLevel].sum   += gap
+    heatmap[fn][sc.skillId][u.jobLevel].count += 1
   }
 
   const activeJobLevels = [...JOB_LEVELS].filter((jl) =>
-    users.some((u) => u.job_level === jl)
+    users.some((u) => u.jobLevel === jl),
   )
 
-  const anySubmitted = asmts.some((a) => a.self_status === 'submitted')
+  const anySubmitted = asmts.some((a) => a.selfStatus === 'submitted')
 
-  // ── Drill-down view: individual employees in a function ──────────────────
+  // ── Drill-down view ──────────────────────────────────────────────────────
   if (drillFn) {
     const fnUsers   = users.filter((u) => u.function === drillFn)
     const fnSkills  = skills.filter((s) => s.function === drillFn)
 
-    // For each user: get their scores and compute gaps per skill
     const userRows = fnUsers.map((u) => {
       const asmt = assmtByEmployee[u.id]
       const skillGaps = fnSkills.map((s) => {
         const asmtScore = asmt
-          ? scores.find((sc) => sc.assessment_id === asmt.id && sc.skill_id === s.id)
+          ? scores.find((sc) => sc.assessmentId === asmt.id && sc.skillId === s.id)
           : null
-        const required = u.job_level ? stdMap[`${s.id}:${u.job_level}`] ?? null : null
-        const gap = asmtScore?.final_score != null && required != null
-          ? asmtScore.final_score - required
+        const required = u.jobLevel ? stdMap[`${s.id}:${u.jobLevel}`] ?? null : null
+        const gap = asmtScore?.finalScore != null && required != null
+          ? asmtScore.finalScore - required
           : null
         return { skillId: s.id, skillName: s.name, gap }
       })
@@ -137,12 +141,12 @@ export default async function DashboardTab({ drillFn }: Props) {
                 {userRows.map(({ user: u, asmt, skillGaps }) => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{u.name}</td>
-                    <td className="px-4 py-3 text-gray-500">{u.job_level ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-500">{u.jobLevel ?? '—'}</td>
                     <td className="px-4 py-3">
-                      <StatusPill status={asmt?.self_status ?? 'not_started'} type="self" />
+                      <StatusPill status={asmt?.selfStatus ?? 'not_started'} type="self" />
                     </td>
                     <td className="px-4 py-3">
-                      <StatusPill status={asmt?.manager_status ?? 'pending'} type="manager" />
+                      <StatusPill status={asmt?.managerStatus ?? 'pending'} type="manager" />
                     </td>
                     {skillGaps.map(({ skillId, gap }) => (
                       <td key={skillId} className="px-4 py-3 text-center">

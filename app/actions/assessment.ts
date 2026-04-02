@@ -1,7 +1,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { prisma } from '@/lib/prisma'
+import { getAuthOrError } from '@/lib/auth-helpers'
 import type { ProficiencyLevel } from '@/lib/types'
 
 // ── Save a single skill score (auto-save draft) ───────────────────────────────
@@ -11,37 +12,29 @@ export async function saveScore(
   skillId: string,
   selfScore: ProficiencyLevel,
 ): Promise<{ error?: string }> {
-  const supabase = await createServerSupabaseClient()
+  const { user, error } = await getAuthOrError()
+  if (error) return { error }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
-
-  // Verify this assessment belongs to the calling user before writing
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('id, self_status, employee_id')
-    .eq('id', assessmentId)
-    .eq('employee_id', user.id)
-    .single()
+  const assessment = await prisma.assessment.findFirst({
+    where: { id: assessmentId, employeeId: user.id },
+    select: { id: true, selfStatus: true },
+  })
 
   if (!assessment) return { error: 'Assessment not found' }
-  if (assessment.self_status === 'submitted') return { error: 'Assessment already submitted' }
+  if (assessment.selfStatus === 'submitted') return { error: 'Assessment already submitted' }
 
-  const { error: upsertError } = await supabase
-    .from('assessment_scores')
-    .upsert(
-      { assessment_id: assessmentId, skill_id: skillId, self_score: selfScore },
-      { onConflict: 'assessment_id,skill_id' },
-    )
-
-  if (upsertError) return { error: upsertError.message }
+  await prisma.assessmentScore.upsert({
+    where: { assessmentId_skillId: { assessmentId, skillId } },
+    update: { selfScore },
+    create: { assessmentId, skillId, selfScore },
+  })
 
   // Advance status to 'draft' the first time a score is saved
-  if (assessment.self_status === 'not_started') {
-    await supabase
-      .from('assessments')
-      .update({ self_status: 'draft' })
-      .eq('id', assessmentId)
+  if (assessment.selfStatus === 'not_started') {
+    await prisma.assessment.update({
+      where: { id: assessmentId },
+      data: { selfStatus: 'draft' },
+    })
   }
 
   return {}
@@ -54,29 +47,23 @@ export async function saveEvidence(
   skillId: string,
   evidence: string,
 ): Promise<{ error?: string }> {
-  const supabase = await createServerSupabaseClient()
+  const { user, error } = await getAuthOrError()
+  if (error) return { error }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
-
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('id, self_status, employee_id')
-    .eq('id', assessmentId)
-    .eq('employee_id', user.id)
-    .single()
+  const assessment = await prisma.assessment.findFirst({
+    where: { id: assessmentId, employeeId: user.id },
+    select: { id: true, selfStatus: true },
+  })
 
   if (!assessment) return { error: 'Assessment not found' }
-  if (assessment.self_status === 'submitted') return { error: 'Assessment already submitted' }
+  if (assessment.selfStatus === 'submitted') return { error: 'Assessment already submitted' }
 
-  const { error: upsertError } = await supabase
-    .from('assessment_scores')
-    .upsert(
-      { assessment_id: assessmentId, skill_id: skillId, evidence: evidence || null },
-      { onConflict: 'assessment_id,skill_id' },
-    )
+  await prisma.assessmentScore.upsert({
+    where: { assessmentId_skillId: { assessmentId, skillId } },
+    update: { evidence: evidence || null },
+    create: { assessmentId, skillId, evidence: evidence || null },
+  })
 
-  if (upsertError) return { error: upsertError.message }
   return {}
 }
 
@@ -85,25 +72,23 @@ export async function saveEvidence(
 export async function submitAssessment(
   assessmentId: string,
 ): Promise<{ error?: string }> {
-  const supabase = await createServerSupabaseClient()
+  const { user, error } = await getAuthOrError()
+  if (error) return { error }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
+  const result = await prisma.assessment.updateMany({
+    where: {
+      id: assessmentId,
+      employeeId: user.id,
+      selfStatus: { in: ['not_started', 'draft'] },
+    },
+    data: {
+      selfStatus: 'submitted',
+      selfSubmittedAt: new Date(),
+    },
+  })
 
-  const { error } = await supabase
-    .from('assessments')
-    .update({
-      self_status: 'submitted',
-      self_submitted_at: new Date().toISOString(),
-    })
-    .eq('id', assessmentId)
-    .eq('employee_id', user.id)        // ownership check
-    .in('self_status', ['not_started', 'draft'])  // guard against double-submit
+  if (result.count === 0) return { error: 'Assessment not found or already submitted' }
 
-  if (error) return { error: error.message }
-
-  // Revalidate causes Next.js to return the updated RSC payload in the same
-  // roundtrip, seamlessly swapping AssessmentForm → GapTable on the client.
   revalidatePath('/employee')
   revalidatePath('/manager')
   return {}

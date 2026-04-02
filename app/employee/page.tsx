@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/auth-helpers'
+import { prisma } from '@/lib/prisma'
 import { logout } from '@/app/actions/auth'
 import AssessmentTabContent from '@/components/assessment/AssessmentTabContent'
 import LanguageToggle from '@/components/LanguageToggle'
@@ -13,16 +14,12 @@ export default async function EmployeePage({
 }: {
   searchParams: Promise<{ tab?: string }>
 }) {
-  const supabase = await createServerSupabaseClient()
+  const authUser = await requireAuth()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: profile } = await supabase
-    .from('users')
-    .select('name, role, function, job_level')
-    .eq('id', user.id)
-    .single()
+  const profile = await prisma.user.findUnique({
+    where: { id: authUser.id },
+    select: { name: true, role: true, function: true, jobLevel: true },
+  })
 
   if (profile?.role !== 'employee') redirect('/login')
 
@@ -30,7 +27,7 @@ export default async function EmployeePage({
   const activeTab   = params.tab === 'result' ? 'result' : 'assessment'
 
   const userFunction = profile.function as FunctionType | null
-  const userJobLevel = profile.job_level
+  const userJobLevel = profile.jobLevel
 
   return (
     <main className="min-h-screen bg-[#F4F6FB]">
@@ -72,7 +69,7 @@ export default async function EmployeePage({
         </div>
 
         <AssessmentTabContent
-          userId={user.id}
+          userId={authUser.id}
           userFunction={userFunction}
           userJobLevel={userJobLevel}
           baseUrl="/employee"

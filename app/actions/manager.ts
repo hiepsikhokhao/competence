@@ -1,7 +1,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { prisma } from '@/lib/prisma'
+import { getAuthOrError } from '@/lib/auth-helpers'
 import type { ProficiencyLevel } from '@/lib/types'
 
 // ── Save a single manager score (auto-save) ───────────────────────────────────
@@ -11,38 +12,30 @@ export async function saveManagerScore(
   skillId: string,
   managerScore: ProficiencyLevel,
 ): Promise<{ error?: string }> {
-  const supabase = await createServerSupabaseClient()
+  const { user, error } = await getAuthOrError()
+  if (error) return { error }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
-
-  // Verify assessment exists and belongs to a direct report
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('id, manager_status, employee_id')
-    .eq('id', assessmentId)
-    .single()
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { id: true, managerStatus: true, employeeId: true },
+  })
 
   if (!assessment) return { error: 'Assessment not found' }
-  if (assessment.manager_status === 'reviewed') return { error: 'Review already submitted' }
+  if (assessment.managerStatus === 'reviewed') return { error: 'Review already submitted' }
 
-  const { data: employee } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', assessment.employee_id)
-    .eq('manager_id', user.id)
-    .single()
+  // Verify manager-employee relationship
+  const employee = await prisma.user.findFirst({
+    where: { id: assessment.employeeId, managerId: user.id },
+    select: { id: true },
+  })
 
   if (!employee) return { error: 'Not authorized to review this assessment' }
 
-  const { error: upsertError } = await supabase
-    .from('assessment_scores')
-    .upsert(
-      { assessment_id: assessmentId, skill_id: skillId, manager_score: managerScore },
-      { onConflict: 'assessment_id,skill_id' },
-    )
-
-  if (upsertError) return { error: upsertError.message }
+  await prisma.assessmentScore.upsert({
+    where: { assessmentId_skillId: { assessmentId, skillId } },
+    update: { managerScore },
+    create: { assessmentId, skillId, managerScore },
+  })
 
   return {}
 }
@@ -52,40 +45,34 @@ export async function saveManagerScore(
 export async function submitManagerReview(
   assessmentId: string,
 ): Promise<{ error?: string }> {
-  const supabase = await createServerSupabaseClient()
+  const { user, error } = await getAuthOrError()
+  if (error) return { error }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
-
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('id, employee_id')
-    .eq('id', assessmentId)
-    .single()
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { id: true, employeeId: true },
+  })
 
   if (!assessment) return { error: 'Assessment not found' }
 
-  const { data: employee } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', assessment.employee_id)
-    .eq('manager_id', user.id)
-    .single()
+  const employee = await prisma.user.findFirst({
+    where: { id: assessment.employeeId, managerId: user.id },
+    select: { id: true },
+  })
 
   if (!employee) return { error: 'Not authorized to review this assessment' }
 
-  const { error } = await supabase
-    .from('assessments')
-    .update({
-      manager_status: 'reviewed',
-      manager_reviewed_at: new Date().toISOString(),
-    })
-    .eq('id', assessmentId)
-    .eq('manager_status', 'pending')   // guard against double-submit
+  const result = await prisma.assessment.updateMany({
+    where: { id: assessmentId, managerStatus: 'pending' },
+    data: {
+      managerStatus: 'reviewed',
+      managerReviewedAt: new Date(),
+    },
+  })
 
-  if (error) return { error: error.message }
+  if (result.count === 0) return { error: 'Review already submitted' }
 
   revalidatePath('/manager')
-  revalidatePath('/employee')  // employee can now see their gap results
+  revalidatePath('/employee')
   return {}
 }

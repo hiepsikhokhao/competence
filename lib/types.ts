@@ -9,9 +9,7 @@ export type CycleStatus   = 'open' | 'closed'
 /** Skill proficiency scale: 1 Basic → 2 Developing → 3 Proficient → 4 Expert */
 export type ProficiencyLevel = 1 | 2 | 3 | 4
 
-// ─── Table row types ──────────────────────────────────────────────────────────
-// Must be `type` aliases (not `interface`) so they satisfy
-// Record<string, unknown> — required by @supabase/postgrest-js GenericTable.Row.
+// ─── Table row types (snake_case for compatibility with existing components) ──
 
 export type User = {
   id:         string
@@ -31,14 +29,14 @@ export type Skill = {
   name:       string
   definition: string | null
   function:   FunctionType
-  importance?: number | null  // 1 = low, 2 = medium, 3 = high
+  importance?: number | null
 }
 
 export type SkillLevel = {
   id:          string
   skill_id:    string
   level:       ProficiencyLevel
-  label:       string | null    // 'Basic' | 'Developing' | 'Proficient' | 'Expert'
+  label:       string | null
   description: string | null
 }
 
@@ -71,8 +69,8 @@ export type AssessmentScore = {
   skill_id:      string
   self_score:    ProficiencyLevel | null
   manager_score: ProficiencyLevel | null
-  final_score:   ProficiencyLevel | null  // generated: coalesce(manager_score, self_score)
-  evidence:      string | null            // optional evidence text; mandatory if self_score > required_level
+  final_score:   ProficiencyLevel | null
+  evidence:      string | null
 }
 
 // ─── Derived / joined types ───────────────────────────────────────────────────
@@ -92,83 +90,3 @@ export type TeamMember = User & {
   assessment: Pick<Assessment, 'self_status' | 'manager_status'> | null
 }
 
-// ─── Database type map (for typed Supabase client) ────────────────────────────
-
-export interface Database {
-  public: {
-    Tables: {
-      users: {
-        Row:           User
-        Insert:        Omit<User, 'created_at'>
-        Update:        Partial<Omit<User, 'id' | 'created_at'>>
-        Relationships: []
-      }
-      skills: {
-        Row:           Skill
-        Insert:        Omit<Skill, 'id'> & { importance?: number | null }
-        Update:        Partial<Omit<Skill, 'id'>>
-        Relationships: []
-      }
-      skill_levels: {
-        Row:           SkillLevel
-        Insert:        Omit<SkillLevel, 'id'>
-        Update:        Partial<Omit<SkillLevel, 'id'>>
-        Relationships: []
-      }
-      skill_standards: {
-        Row:           SkillStandard
-        Insert:        SkillStandard
-        Update:        Partial<SkillStandard>
-        Relationships: []
-      }
-      cycle: {
-        Row:    Cycle
-        Insert: {
-          name:      string
-          status?:   CycleStatus
-          opened_at?: string | null
-          closed_at?: string | null
-        }
-        Update:        Partial<Omit<Cycle, 'id'>>
-        Relationships: []
-      }
-      assessments: {
-        Row:    Assessment
-        // self_status, manager_status have DB defaults; timestamps default to null
-        Insert: {
-          cycle_id:            string
-          employee_id:         string
-          self_status?:         SelfStatus
-          manager_status?:      ManagerStatus
-          self_submitted_at?:   string | null
-          manager_reviewed_at?: string | null
-        }
-        Update:        Partial<Omit<Assessment, 'id'>>
-        Relationships: []
-      }
-      assessment_scores: {
-        Row:    AssessmentScore
-        // final_score is GENERATED ALWAYS — excluded from writes
-        // scores are nullable (default null until rated)
-        Insert: {
-          assessment_id: string
-          skill_id:      string
-          self_score?:    ProficiencyLevel | null
-          manager_score?: ProficiencyLevel | null
-          evidence?:      string | null
-        }
-        Update:        Partial<Omit<AssessmentScore, 'final_score'>>
-        Relationships: []
-      }
-    }
-    Views:     Record<string, never>
-    Functions: Record<string, never>
-    Enums: {
-      user_role:      UserRole
-      function_type:  FunctionType
-      self_status:    SelfStatus
-      manager_status: ManagerStatus
-      cycle_status:   CycleStatus
-    }
-  }
-}

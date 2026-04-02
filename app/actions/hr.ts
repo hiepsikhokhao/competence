@@ -1,25 +1,9 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { prisma } from '@/lib/prisma'
+import { requireHrOrError } from '@/lib/auth-helpers'
 import type { FunctionType, ProficiencyLevel, Skill, UserRole } from '@/lib/types'
-
-// ── Auth guard ────────────────────────────────────────────────────────────────
-
-async function requireHr() {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  const { data: profile } = await supabase
-    .from('users')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
-  if (profile?.role !== 'hr') throw new Error('Not authorized')
-  return supabase
-}
 
 function revalidateAll() {
   revalidatePath('/hr')
@@ -33,9 +17,9 @@ export async function createCycle(
   name: string,
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
-    const { error } = await supabase.from('cycle').insert({ name })
-    if (error) return { error: error.message }
+    const { error } = await requireHrOrError()
+    if (error) return { error }
+    await prisma.cycle.create({ data: { name } })
     revalidatePath('/hr')
     return {}
   } catch (e) { return { error: (e as Error).message } }
@@ -45,12 +29,12 @@ export async function openCycle(
   cycleId: string,
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
-    const { error } = await supabase
-      .from('cycle')
-      .update({ status: 'open', opened_at: new Date().toISOString() })
-      .eq('id', cycleId)
-    if (error) return { error: error.message }
+    const { error } = await requireHrOrError()
+    if (error) return { error }
+    await prisma.cycle.update({
+      where: { id: cycleId },
+      data: { status: 'open', openedAt: new Date() },
+    })
     revalidateAll()
     return {}
   } catch (e) { return { error: (e as Error).message } }
@@ -60,12 +44,12 @@ export async function closeCycle(
   cycleId: string,
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
-    const { error } = await supabase
-      .from('cycle')
-      .update({ status: 'closed', closed_at: new Date().toISOString() })
-      .eq('id', cycleId)
-    if (error) return { error: error.message }
+    const { error } = await requireHrOrError()
+    if (error) return { error }
+    await prisma.cycle.update({
+      where: { id: cycleId },
+      data: { status: 'closed', closedAt: new Date() },
+    })
     revalidateAll()
     return {}
   } catch (e) { return { error: (e as Error).message } }
@@ -78,12 +62,12 @@ export async function updateUserManager(
   managerId: string | null,
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
-    const { error } = await supabase
-      .from('users')
-      .update({ manager_id: managerId })
-      .eq('id', userId)
-    if (error) return { error: error.message }
+    const { error } = await requireHrOrError()
+    if (error) return { error }
+    await prisma.user.update({
+      where: { id: userId },
+      data: { managerId },
+    })
     revalidatePath('/hr')
     return {}
   } catch (e) { return { error: (e as Error).message } }
@@ -113,11 +97,12 @@ const VALID_FUNCS: FunctionType[] = ['UA', 'MKT', 'LiveOps']
 export async function importUsers(
   rows: CsvUserRow[],
 ): Promise<ImportResult> {
-  const supabase = await requireHr()
+  const { error } = await requireHrOrError()
+  if (error) return { updated: 0, skipped: 0, errors: [error] }
 
-  const { data: existing } = await supabase.from('users').select('id, email')
+  const existing = await prisma.user.findMany({ select: { id: true, email: true } })
   const emailToId = Object.fromEntries(
-    (existing ?? []).map((u) => [u.email.toLowerCase(), u.id])
+    existing.map((u) => [u.email.toLowerCase(), u.id]),
   )
 
   let updated = 0
@@ -135,23 +120,26 @@ export async function importUsers(
     }
 
     const patch: Record<string, unknown> = {}
-    if (row.name?.trim())                                      patch.name      = row.name.trim()
-    if (row.dept?.trim())                                      patch.dept      = row.dept.trim()
-    if (row.job_level?.trim())                                 patch.job_level = row.job_level.trim()
+    if (row.name?.trim())                                            patch.name     = row.name.trim()
+    if (row.dept?.trim())                                            patch.dept     = row.dept.trim()
+    if (row.job_level?.trim())                                       patch.jobLevel = row.job_level.trim()
     if (row.role     && VALID_ROLES.includes(row.role as UserRole))         patch.role     = row.role
     if (row.function && VALID_FUNCS.includes(row.function as FunctionType)) patch.function = row.function
 
     if (row.manager_email?.trim()) {
       const managerId = emailToId[row.manager_email.trim().toLowerCase()]
-      patch.manager_id = managerId ?? null
+      patch.managerId = managerId ?? null
       if (!managerId) errors.push(`Manager not found for ${row.email}: ${row.manager_email}`)
     }
 
     if (Object.keys(patch).length === 0) { skipped++; continue }
 
-    const { error } = await supabase.from('users').update(patch).eq('id', userId)
-    if (error) { errors.push(`${row.email}: ${error.message}`) }
-    else       { updated++ }
+    try {
+      await prisma.user.update({ where: { id: userId }, data: patch })
+      updated++
+    } catch (e) {
+      errors.push(`${row.email}: ${(e as Error).message}`)
+    }
   }
 
   revalidatePath('/hr')
@@ -166,15 +154,13 @@ export async function createSkill(input: {
   function:   FunctionType
 }): Promise<{ skill?: Skill; error?: string }> {
   try {
-    const supabase = await requireHr()
-    const { data, error } = await supabase
-      .from('skills')
-      .insert(input)
-      .select()
-      .single()
-    if (error) return { error: error.message }
+    const { error } = await requireHrOrError()
+    if (error) return { error }
+    const skill = await prisma.skill.create({
+      data: { name: input.name, definition: input.definition, function: input.function },
+    })
     revalidateAll()
-    return { skill: data as Skill }
+    return { skill: { id: skill.id, name: skill.name, definition: skill.definition, function: skill.function } as Skill }
   } catch (e) { return { error: (e as Error).message } }
 }
 
@@ -183,9 +169,9 @@ export async function updateSkill(
   patch: { name: string; definition: string | null },
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
-    const { error } = await supabase.from('skills').update(patch).eq('id', id)
-    if (error) return { error: error.message }
+    const { error } = await requireHrOrError()
+    if (error) return { error }
+    await prisma.skill.update({ where: { id }, data: patch })
     revalidateAll()
     return {}
   } catch (e) { return { error: (e as Error).message } }
@@ -195,9 +181,9 @@ export async function deleteSkill(
   id: string,
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
-    const { error } = await supabase.from('skills').delete().eq('id', id)
-    if (error) return { error: error.message }
+    const { error } = await requireHrOrError()
+    if (error) return { error }
+    await prisma.skill.delete({ where: { id } })
     revalidateAll()
     return {}
   } catch (e) { return { error: (e as Error).message } }
@@ -210,22 +196,19 @@ export async function revertAssessment(
   stage: 'manager' | 'self',
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
+    const { error } = await requireHrOrError()
+    if (error) return { error }
 
     if (stage === 'manager') {
-      const { error } = await supabase
-        .from('assessments')
-        .update({ manager_status: 'pending', manager_reviewed_at: null })
-        .eq('id', assessmentId)
-        .eq('manager_status', 'reviewed')
-      if (error) return { error: error.message }
+      await prisma.assessment.updateMany({
+        where: { id: assessmentId, managerStatus: 'reviewed' },
+        data: { managerStatus: 'pending', managerReviewedAt: null },
+      })
     } else {
-      const { error } = await supabase
-        .from('assessments')
-        .update({ self_status: 'draft', self_submitted_at: null })
-        .eq('id', assessmentId)
-        .eq('self_status', 'submitted')
-      if (error) return { error: error.message }
+      await prisma.assessment.updateMany({
+        where: { id: assessmentId, selfStatus: 'submitted' },
+        data: { selfStatus: 'draft', selfSubmittedAt: null },
+      })
     }
 
     revalidateAll()
@@ -241,27 +224,14 @@ export async function upsertSkillLevel(
   patch: { label?: string | null; description?: string | null },
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
-    // Use raw upsert via RPC-like approach: update if exists, insert if not
-    const { data: existing } = await supabase
-      .from('skill_levels')
-      .select('id')
-      .eq('skill_id', skillId)
-      .eq('level', level)
-      .maybeSingle()
+    const { error } = await requireHrOrError()
+    if (error) return { error }
 
-    if (existing) {
-      const { error } = await supabase
-        .from('skill_levels')
-        .update(patch)
-        .eq('id', existing.id)
-      if (error) return { error: error.message }
-    } else {
-      const { error } = await supabase
-        .from('skill_levels')
-        .insert({ skill_id: skillId, level, label: null, description: patch.description ?? null })
-      if (error) return { error: error.message }
-    }
+    await prisma.skillLevel.upsert({
+      where: { skillId_level: { skillId, level } },
+      update: patch,
+      create: { skillId, level, label: patch.label ?? null, description: patch.description ?? null },
+    })
 
     revalidateAll()
     return {}
@@ -273,26 +243,22 @@ export async function upsertSkillLevel(
 export async function upsertStandard(
   skillId:       string,
   jobLevel:      string,
-  requiredLevel: ProficiencyLevel | null,   // null = delete
+  requiredLevel: ProficiencyLevel | null,
 ): Promise<{ error?: string }> {
   try {
-    const supabase = await requireHr()
+    const { error } = await requireHrOrError()
+    if (error) return { error }
 
     if (requiredLevel === null) {
-      const { error } = await supabase
-        .from('skill_standards')
-        .delete()
-        .eq('skill_id', skillId)
-        .eq('job_level', jobLevel)
-      if (error) return { error: error.message }
+      await prisma.skillStandard.deleteMany({
+        where: { skillId, jobLevel },
+      })
     } else {
-      const { error } = await supabase
-        .from('skill_standards')
-        .upsert(
-          { skill_id: skillId, job_level: jobLevel, required_level: requiredLevel },
-          { onConflict: 'skill_id,job_level' },
-        )
-      if (error) return { error: error.message }
+      await prisma.skillStandard.upsert({
+        where: { skillId_jobLevel: { skillId, jobLevel } },
+        update: { requiredLevel },
+        create: { skillId, jobLevel, requiredLevel },
+      })
     }
 
     revalidateAll()

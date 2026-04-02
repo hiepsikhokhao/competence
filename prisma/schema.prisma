@@ -1,0 +1,155 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  employee
+  manager
+  hr
+}
+
+enum FunctionType {
+  UA
+  MKT
+  LiveOps
+}
+
+enum SelfStatus {
+  not_started
+  draft
+  submitted
+}
+
+enum ManagerStatus {
+  pending
+  reviewed
+}
+
+enum CycleStatus {
+  open
+  closed
+}
+
+// ── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id        String        @id @default(uuid()) @db.Uuid
+  name      String
+  email     String        @unique
+  username  String?       @unique
+  password  String
+  role      UserRole      @default(employee)
+  dept      String?
+  function  FunctionType? @map("function")
+  jobLevel  String?       @map("job_level")
+  managerId String?       @map("manager_id") @db.Uuid
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  manager     User?        @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  reports     User[]       @relation("ManagerReports")
+  assessments Assessment[]
+
+  @@index([managerId])
+  @@index([function])
+  @@index([jobLevel])
+  @@index([username])
+  @@map("users")
+}
+
+model Skill {
+  id           String       @id @default(uuid()) @db.Uuid
+  name         String
+  definition   String?
+  definitionEn String?      @map("definition_en")
+  definitionVi String?      @map("definition_vi")
+  function     FunctionType
+  importance   Int?
+
+  levels    SkillLevel[]
+  standards SkillStandard[]
+  scores    AssessmentScore[]
+
+  @@index([function])
+  @@map("skills")
+}
+
+model SkillLevel {
+  id            String  @id @default(uuid()) @db.Uuid
+  skillId       String  @map("skill_id") @db.Uuid
+  level         Int
+  label         String?
+  description   String?
+  descriptionEn String? @map("description_en")
+  descriptionVi String? @map("description_vi")
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, level])
+  @@map("skill_levels")
+}
+
+model SkillStandard {
+  skillId       String @map("skill_id") @db.Uuid
+  jobLevel      String @map("job_level")
+  requiredLevel Int    @map("required_level")
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([skillId, jobLevel])
+  @@index([jobLevel])
+  @@map("skill_standards")
+}
+
+model Cycle {
+  id       String      @id @default(uuid()) @db.Uuid
+  name     String      @default("POC 2026")
+  status   CycleStatus @default(closed)
+  openedAt DateTime?   @map("opened_at") @db.Timestamptz
+  closedAt DateTime?   @map("closed_at") @db.Timestamptz
+
+  assessments Assessment[]
+
+  @@map("cycle")
+}
+
+model Assessment {
+  id                String        @id @default(uuid()) @db.Uuid
+  cycleId           String        @map("cycle_id") @db.Uuid
+  employeeId        String        @map("employee_id") @db.Uuid
+  selfStatus        SelfStatus    @default(not_started) @map("self_status")
+  managerStatus     ManagerStatus @default(pending) @map("manager_status")
+  selfSubmittedAt   DateTime?     @map("self_submitted_at") @db.Timestamptz
+  managerReviewedAt DateTime?     @map("manager_reviewed_at") @db.Timestamptz
+
+  cycle    Cycle             @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employee User              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  scores   AssessmentScore[]
+
+  @@unique([employeeId])
+  @@index([cycleId])
+  @@index([employeeId])
+  @@map("assessments")
+}
+
+model AssessmentScore {
+  assessmentId String @map("assessment_id") @db.Uuid
+  skillId      String @map("skill_id") @db.Uuid
+  selfScore    Int?   @map("self_score")
+  managerScore Int?   @map("manager_score")
+  finalScore   Int?   @map("final_score")
+  evidence     String?
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  skill      Skill      @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([assessmentId, skillId])
+  @@index([assessmentId])
+  @@map("assessment_scores")
+}
