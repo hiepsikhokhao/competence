@@ -15,9 +15,30 @@ import bcrypt from 'bcryptjs'
 const prisma = new PrismaClient()
 
 async function main() {
+  // ── Step 0: Drop existing generated column if present (needed for fresh db push) ─
+  console.log('[init-db] Ensuring clean state for final_score...')
+  try {
+    await prisma.$executeRawUnsafe(`
+      DO $$
+      BEGIN
+        -- Drop the generated column if it exists (Prisma can't push schema with it present)
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'assessment_scores' AND column_name = 'final_score'
+          AND is_generated != 'NEVER'
+        ) THEN
+          ALTER TABLE assessment_scores DROP COLUMN final_score;
+        END IF;
+      END $$;
+    `)
+    console.log('[init-db] Cleaned up existing generated column (if any)')
+  } catch (e) {
+    // Ignore if column doesn't exist yet
+  }
+
   // ── Step 1: Push schema (idempotent — only creates missing tables) ────────
   console.log('[init-db] Pushing Prisma schema...')
-  execSync('npx prisma db push --skip-generate --accept-data-loss 2>&1', {
+  execSync('npx prisma db push --skip-generate --accept-data-loss 2>&2', {
     stdio: 'inherit',
     env: process.env,
   })
