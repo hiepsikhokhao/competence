@@ -21,7 +21,7 @@ services:
         DATABASE_URL: postgresql://app:${DB_PASSWORD:-changeme}@db:5432/competency
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-3012}:3012"
+      - "${APP_PORT:-3000}:3000"
     environment:
       DATABASE_URL: postgresql://app:${DB_PASSWORD:-changeme}@db:5432/competency
       AUTH_SECRET: ${AUTH_SECRET:-please-change-this-secret-in-production}

@@ -54,9 +54,9 @@ RUN chown -R nextjs:nodejs .next scripts
 
 USER nextjs
 
-EXPOSE 3012
+EXPOSE 3000
 
-ENV PORT=3012
+ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 CMD ["sh", "scripts/docker-entrypoint.sh"]
