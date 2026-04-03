@@ -11,7 +11,7 @@ const rolePathMap: Record<UserRole, string> = {
 const protectedSegments = new Set(['hr', 'manager', 'employee'])
 
 export async function proxy(request: NextRequest) {
-  const token = await getToken({ req: request })
+  const token = await getToken({ req: request, secret: process.env.AUTH_SECRET })
   const isAuthenticated = !!token
   const role = token?.role as UserRole | undefined
 
