@@ -10,6 +10,14 @@ const rolePathMap: Record<UserRole, string> = {
 
 const protectedSegments = new Set(['hr', 'manager', 'employee'])
 
+/** 302 redirect with loop guard — passes through if target === current path */
+function safeRedirect(url: URL, request: NextRequest) {
+  if (url.pathname === request.nextUrl.pathname) {
+    return NextResponse.next()
+  }
+  return NextResponse.redirect(url, 302)
+}
+
 export async function proxy(request: NextRequest) {
   const token = await getToken({ req: request, secret: process.env.AUTH_SECRET })
   const isAuthenticated = !!token
@@ -21,7 +29,7 @@ export async function proxy(request: NextRequest) {
 
   if (pathname === '/login') {
     if (isAuthenticated && role) {
-      return NextResponse.redirect(new URL(rolePathMap[role], request.url))
+      return safeRedirect(new URL(rolePathMap[role], request.url), request)
     }
     return NextResponse.next()
   }
@@ -30,9 +38,9 @@ export async function proxy(request: NextRequest) {
 
   if (pathname === '/') {
     if (!isAuthenticated || !role) {
-      return NextResponse.redirect(new URL('/login', request.url))
+      return safeRedirect(new URL('/login', request.url), request)
     }
-    return NextResponse.redirect(new URL(rolePathMap[role], request.url))
+    return safeRedirect(new URL(rolePathMap[role], request.url), request)
   }
 
   // ── Protected routes (/hr, /manager, /employee) ───────────────────────────
@@ -40,13 +48,13 @@ export async function proxy(request: NextRequest) {
   if (!isAuthenticated) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('next', pathname)
-    return NextResponse.redirect(loginUrl)
+    return safeRedirect(loginUrl, request)
   }
 
   if (role) {
     const firstSegment = pathname.split('/')[1]
     if (protectedSegments.has(firstSegment) && firstSegment !== role) {
-      return NextResponse.redirect(new URL(rolePathMap[role], request.url))
+      return safeRedirect(new URL(rolePathMap[role], request.url), request)
     }
   }
 
