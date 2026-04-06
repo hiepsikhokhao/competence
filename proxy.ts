@@ -19,7 +19,13 @@ function safeRedirect(url: URL, request: NextRequest) {
 }
 
 export async function proxy(request: NextRequest) {
-  const token = await getToken({ req: request, secret: process.env.AUTH_SECRET })
+  const isSecure = request.headers.get('x-forwarded-proto') === 'https' ||
+                   request.nextUrl.protocol === 'https:'
+  const token = await getToken({
+    req: request,
+    secret: process.env.AUTH_SECRET,
+    secureCookie: isSecure,
+  })
   const isAuthenticated = !!token
   const role = token?.role as UserRole | undefined
 
