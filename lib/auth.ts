@@ -1,11 +1,17 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
+import Keycloak from 'next-auth/providers/keycloak'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   providers: [
+    Keycloak({
+      clientId: process.env.KEYCLOAK_CLIENT_ID,
+      clientSecret: process.env.KEYCLOAK_CLIENT_SECRET,
+      issuer: process.env.KEYCLOAK_ISSUER,
+    }),
     Credentials({
       credentials: {
         email: { label: 'Email', type: 'email' },
@@ -39,11 +45,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: 'jwt' },
   pages: { signIn: '/login' },
   callbacks: {
-    jwt({ token, user }) {
-      if (user) {
+    async jwt({ token, user, account }) {
+      // Credentials login — user object already has role from authorize()
+      if (user && account?.provider === 'credentials') {
         token.id = user.id!
         token.role = (user as any).role
+        return token
       }
+
+      // Keycloak login — lookup role from DB by email
+      if (user && account?.provider === 'keycloak') {
+        const dbUser = await prisma.user.findUnique({
+          where: { email: user.email! },
+          select: { id: true, role: true },
+        })
+        if (dbUser) {
+          token.id = dbUser.id
+          token.role = dbUser.role
+        }
+        return token
+      }
+
       return token
     },
     session({ session, token }) {
